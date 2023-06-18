@@ -30,7 +30,7 @@ from parsl.multiprocessing import SpawnProcess as mpSpawnProcess
 
 from parsl.multiprocessing import SizedQueue as mpQueue
 
-from parsl.serialize import unpack_apply_message, serialize
+from parsl.serialize import unpack_apply_message, unpack_buffers, deserialize, serialize
 
 HEARTBEAT_CODE = (2 ** 32) - 1
 
@@ -67,7 +67,8 @@ class Manager:
                  poll_period=10,
                  cpu_affinity=False,
                  available_accelerators: Sequence[str] = (),
-                 start_method: str = 'fork'):
+                 start_method: str = 'fork',
+                 proxy_modules=False):
         """
         Parameters
         ----------
@@ -128,6 +129,8 @@ class Manager:
             What method to use to start new worker processes. Choices are fork, spawn, and thread.
             Default: fork
 
+        proxy_modules: bool
+            Use proxy modules to move dependencies to different nodes.
         """
 
         logger.info("Manager started")
@@ -216,6 +219,8 @@ class Manager:
         if self.accelerators_available:
             self.worker_count = min(len(self.available_accelerators), self.worker_count)
         logger.info("Manager will spawn {} workers".format(self.worker_count))
+
+        self.proxy_modules = proxy_modules
 
     def create_reg_message(self):
         """ Creates a registration message to identify the worker to the interchange
@@ -433,7 +438,8 @@ class Manager:
                                      self.ready_worker_queue,
                                      self._tasks_in_progress,
                                      self.cpu_affinity,
-                                     self.available_accelerators[worker_id] if self.accelerators_available else None),
+                                     self.available_accelerators[worker_id] if self.accelerators_available else None,
+                                     self.proxy_modules),
                                name="HTEX-Worker-{}".format(worker_id))
             p.start()
             self.procs[worker_id] = p
@@ -478,7 +484,7 @@ class Manager:
         return
 
 
-def execute_task(bufs):
+def execute_task(bufs, proxy_modules=False):
     """Deserialize the buffer and execute the task.
 
     Returns the result or throws exception.
@@ -486,7 +492,16 @@ def execute_task(bufs):
     user_ns = locals()
     user_ns.update({'__builtins__': __builtins__})
 
-    f, args, kwargs = unpack_apply_message(bufs, user_ns, copy=False)
+    if proxy_modules:
+        import proxy_imports
+
+        (f_buffer, a_buffer, k_buffer, m_buffer) = unpack_buffers(bufs)
+        modules = deserialize(m_buffer)
+        config = proxy_imports.read_config()
+        sys.meta_path.insert(0, proxy_imports.ProxyImporter(modules, config["package_path"]))
+        (f, args, kwargs) = [deserialize(buf) for buf in (f_buffer, a_buffer, k_buffer)]
+    else:
+        f, args, kwargs = unpack_apply_message(bufs, user_ns, copy=False)
 
     # We might need to look into callability of the function from itself
     # since we change it's name in the new namespace
@@ -508,7 +523,7 @@ def execute_task(bufs):
 
 
 @wrap_with_logs(target="worker_log")
-def worker(worker_id, pool_id, pool_size, task_queue, result_queue, worker_queue, tasks_in_progress, cpu_affinity, accelerator: Optional[str]):
+def worker(worker_id, pool_id, pool_size, task_queue, result_queue, worker_queue, tasks_in_progress, cpu_affinity, accelerator: Optional[str], proxy_modules:bool = False):
     """
 
     Put request token into queue
@@ -593,7 +608,7 @@ def worker(worker_id, pool_id, pool_size, task_queue, result_queue, worker_queue
             pass
 
         try:
-            result = execute_task(req['buffer'])
+            result = execute_task(req['buffer'], proxy_modules)
             serialized_result = serialize(result, buffer_threshold=1000000)
         except Exception as e:
             logger.info('Caught an exception: {}'.format(e))
@@ -682,6 +697,8 @@ if __name__ == "__main__":
                         help="Names of available accelerators")
     parser.add_argument("--start-method", type=str, choices=["fork", "spawn", "thread"], default="fork",
                         help="Method used to start new worker processes")
+    parser.add_argument("--proxy-modules", action='store_true',
+                        help="Use proxy_modules to use move modules")
 
     args = parser.parse_args()
 
@@ -711,6 +728,10 @@ if __name__ == "__main__":
         logger.info("CPU affinity: {}".format(args.cpu_affinity))
         logger.info("Accelerators: {}".format(" ".join(args.available_accelerators)))
         logger.info("Start method: {}".format(args.start_method))
+        logger.info("Proxy Modules: {}".format(args.proxy_modules))
+
+        if args.proxy_modules:
+            import proxy_imports # Cache in sys.modules for use in workers
 
         manager = Manager(task_port=args.task_port,
                           result_port=args.result_port,
@@ -726,7 +747,9 @@ if __name__ == "__main__":
                           heartbeat_period=int(args.hb_period),
                           poll_period=int(args.poll),
                           cpu_affinity=args.cpu_affinity,
-                          available_accelerators=args.available_accelerators)
+                          available_accelerators=args.available_accelerators,
+                          proxy_modules=args.proxy_modules
+                          )
         manager.start()
 
     except Exception:

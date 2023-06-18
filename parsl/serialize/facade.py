@@ -27,7 +27,7 @@ def _list_methods() -> Tuple[Dict[bytes, SerializerBase], Dict[bytes, Serializer
     return methods_for_code, methods_for_data
 
 
-def pack_apply_message(func: Any, args: Any, kwargs: Any, buffer_threshold: int = int(128 * 1e6)) -> bytes:
+def pack_apply_message(*args, buffer_threshold: int = int(128 * 1e6)) -> bytes:
     """Serialize and pack function and parameters
 
     Parameters
@@ -46,10 +46,8 @@ def pack_apply_message(func: Any, args: Any, kwargs: Any, buffer_threshold: int 
         Limits buffer to specified size in bytes. Exceeding this limit would give you
         a warning in the log. Default is 128MB.
     """
-    b_func = serialize(func, buffer_threshold=buffer_threshold)
-    b_args = serialize(args, buffer_threshold=buffer_threshold)
-    b_kwargs = serialize(kwargs, buffer_threshold=buffer_threshold)
-    packed_buffer = pack_buffers([b_func, b_args, b_kwargs])
+    buffers = [serialize(arg, buffer_threshold=buffer_threshold) for arg in args]
+    packed_buffer = pack_buffers(buffers)
     return packed_buffer
 
 

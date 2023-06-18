@@ -210,7 +210,8 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin):
                  poll_period: int = 10,
                  address_probe_timeout: Optional[int] = None,
                  worker_logdir_root: Optional[str] = None,
-                 block_error_handler: bool = True):
+                 block_error_handler: bool = True,
+                 proxy_modules: bool = False):
 
         logger.debug("Initializing HighThroughputExecutor")
 
@@ -280,6 +281,7 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin):
         self.run_dir = '.'
         self.worker_logdir_root = worker_logdir_root
         self.cpu_affinity = cpu_affinity
+        self.proxy_modules = proxy_modules
 
         if not launch_cmd:
             self.launch_cmd = ("process_worker_pool.py {debug} {max_workers} "
@@ -297,7 +299,8 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin):
                                "--hb_threshold={heartbeat_threshold} "
                                "--cpu-affinity {cpu_affinity} "
                                "--available-accelerators {accelerators} "
-                               "--start-method {start_method}")
+                               "--start-method {start_method} "
+                               "{proxy_modules}")
 
     radio_mode = "htex"
 
@@ -316,6 +319,8 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin):
         worker_logdir = "{}/{}".format(self.run_dir, self.label)
         if self.worker_logdir_root is not None:
             worker_logdir = "{}/{}".format(self.worker_logdir_root, self.label)
+        
+        proxy_module_opts = "--proxy-modules" if self.proxy_modules else ""
 
         l_cmd = self.launch_cmd.format(debug=debug_opts,
                                        prefetch_capacity=self.prefetch_capacity,
@@ -333,7 +338,8 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin):
                                        logdir=worker_logdir,
                                        cpu_affinity=self.cpu_affinity,
                                        accelerators=" ".join(self.available_accelerators),
-                                       start_method=self.start_method)
+                                       start_method=self.start_method,
+                                       proxy_modules=proxy_module_opts)
         self.launch_cmd = l_cmd
         logger.debug("Launch command: {}".format(self.launch_cmd))
 
@@ -590,8 +596,14 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin):
         self.tasks[task_id] = fut
 
         try:
-            fn_buf = pack_apply_message(func, args, kwargs,
-                                        buffer_threshold=1024 * 1024)
+            if self.proxy_modules:
+                modules = kwargs["modules"]
+                del kwargs["modules"]
+                fn_buf = pack_apply_message(func, args, kwargs, modules,
+                                            buffer_threshold=1024*1024)
+            else:
+                fn_buf = pack_apply_message(func, args, kwargs,
+                                            buffer_threshold=1024 * 1024)
         except TypeError:
             raise SerializationError(func.__name__)
 
