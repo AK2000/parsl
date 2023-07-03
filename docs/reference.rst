@@ -77,7 +77,6 @@ Executors
     parsl.executors.HighThroughputExecutor
     parsl.executors.WorkQueueExecutor
     parsl.executors.FluxExecutor
-    parsl.executors.swift_t.TurbineExecutor
 
 Launchers
 =========
@@ -86,7 +85,7 @@ Launchers
     :toctree: stubs
     :nosignatures:
 
-    parsl.launchers.launchers.Launcher
+    parsl.launchers.base.Launcher
     parsl.launchers.SimpleLauncher
     parsl.launchers.SingleNodeLauncher
     parsl.launchers.SrunLauncher
@@ -136,6 +135,7 @@ Exceptions
     parsl.app.errors.BashExitFailure
     parsl.app.errors.MissingOutputs
     parsl.app.errors.ParslError
+    parsl.errors.ConfigurationError
     parsl.errors.OptionalModuleMissing
     parsl.executors.errors.ExecutorError
     parsl.executors.errors.ScalingFailed
@@ -143,7 +143,6 @@ Exceptions
     parsl.executors.errors.DeserializationError
     parsl.executors.errors.BadMessage
     parsl.dataflow.errors.DataFlowException
-    parsl.dataflow.errors.ConfigurationError
     parsl.dataflow.errors.BadCheckpoint
     parsl.dataflow.errors.DependencyError
     parsl.dataflow.errors.JoinError
@@ -174,11 +173,11 @@ Internal
     parsl.app.bash.BashApp
     parsl.app.python.PythonApp
     parsl.dataflow.dflow.DataFlowKernel
-    parsl.dataflow.flow_control.FlowControl
+    parsl.dataflow.job_status_poller.JobStatusPoller
     parsl.dataflow.memoization.id_for_memo
     parsl.dataflow.memoization.Memoizer
     parsl.dataflow.states.FINAL_STATES
     parsl.dataflow.states.States
     parsl.dataflow.strategy.Strategy
-    parsl.dataflow.flow_control.Timer
     parsl.dataflow.taskrecord.TaskRecord
+    parsl.utils.Timer

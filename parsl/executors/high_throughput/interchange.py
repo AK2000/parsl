@@ -62,7 +62,7 @@ class VersionMismatch(Exception):
         return self.__repr__()
 
 
-class Interchange(object):
+class Interchange:
     """ Interchange is a task orchestrator for distributed systems.
 
     1. Asynchronously queue large volume of tasks (>100K)
@@ -312,10 +312,11 @@ class Interchange(object):
                     if manager_id in self._ready_managers:
                         m = self._ready_managers[manager_id]
                         m['active'] = False
-                        reply = True
                         self._send_monitoring_info(hub_channel, m)
                     else:
-                        reply = False
+                        logger.warning("Worker to hold was not in ready managers list")
+
+                    reply = None
 
                 else:
                     reply = None
