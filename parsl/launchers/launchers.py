@@ -1,8 +1,23 @@
+from abc import ABCMeta, abstractmethod
 import logging
 
-from parsl.launchers.base import Launcher
+from parsl.utils import RepresentationMixin
 
 logger = logging.getLogger(__name__)
+
+
+class Launcher(RepresentationMixin, metaclass=ABCMeta):
+    """Launchers are basically wrappers for user submitted scripts as they
+    are submitted to a specific execution resource.
+    """
+    def __init__(self, debug: bool = True):
+        self.debug = debug
+
+    @abstractmethod
+    def __call__(self, command: str, tasks_per_node: int, nodes_per_block: int) -> str:
+        """ Wraps the command with the Launcher calls.
+        """
+        pass
 
 
 class SimpleLauncher(Launcher):
@@ -452,53 +467,6 @@ APRUN_EOF
 chmod a+x cmd_$JOBNAME.sh
 
 aprun -n {tasks_per_block} -N {tasks_per_node} {overrides} /bin/bash cmd_$JOBNAME.sh &
-wait
-
-[[ "{debug}" == "1" ]] && echo "Done"
-'''.format(command=command,
-           tasks_per_block=tasks_per_block,
-           tasks_per_node=tasks_per_node,
-           overrides=self.overrides,
-           debug=debug_num)
-        return x
-
-class GeopmAprunLauncher(Launcher):
-    """  Worker launcher that wraps the user's command with the Aprun launch framework
-    to launch multiple cmd invocations in parallel on a single job allocation
-
-    """
-    def __init__(self, debug: bool = True, overrides: str = ''):
-        """
-        Parameters
-        ----------
-
-        overrides: str
-             This string will be passed to the aprun launcher. Default: ''
-        """
-        super().__init__(debug=debug)
-        self.overrides = overrides
-
-    def __call__(self, command: str, tasks_per_node: int, nodes_per_block: int) -> str:
-        """
-        Args:
-        - command (string): The command string to be launched
-        - tasks_per_node (int) : Workers to launch per node
-        - nodes_per_block (int) : Number of nodes in a block
-
-        """
-
-        tasks_per_block = tasks_per_node * nodes_per_block
-        debug_num = int(self.debug)
-
-        x = '''set -e
-WORKERCOUNT={tasks_per_block}
-
-cat << APRUN_EOF > cmd_$JOBNAME.sh
-{command}
-APRUN_EOF
-chmod a+x cmd_$JOBNAME.sh
-
-geopmlaunch aprun -n {tasks_per_block} -N {tasks_per_node} {overrides} /bin/bash cmd_$JOBNAME.sh &
 wait
 
 [[ "{debug}" == "1" ]] && echo "Done"
