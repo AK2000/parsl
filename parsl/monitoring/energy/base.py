@@ -36,7 +36,7 @@ class NodeEnergyMonitor(RepresentationMixin, metaclass=ABCMeta):
     def report(self) -> dict:
         pass
 
-def JobEnergyMonitor(RepresentationMixin, metaclass=ABCMeta):
+class JobEnergyMonitor(RepresentationMixin, metaclass=ABCMeta):
     """JobEnergyMonitor provides a interface to access job monitoring information
     usually provided by the cluster scheduler (i.e. Slurm or PBS)"""
 
@@ -49,3 +49,6 @@ def JobEnergyMonitor(RepresentationMixin, metaclass=ABCMeta):
 
     @abstractmethod
     def add(self, jobid: str) -> None:
+
+def get_launch_command():
+    return ""
