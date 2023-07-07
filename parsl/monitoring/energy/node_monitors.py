@@ -28,7 +28,7 @@ class RaplCPUNodeEnergyMonitor(NodeEnergyMonitor):
     def report(self):
         total_energy = 0
         start_time = 0
-        end_time = time.clock_gettime()
+        end_time = time.clock_gettime(time.CLOCK_MONOTONIC)
 
 
         devices = {f"package-{i}": Result(start_time, end_time, -1) for i in range(self._socket_ids[-1] + 1)}
@@ -51,7 +51,7 @@ class RaplCPUNodeEnergyMonitor(NodeEnergyMonitor):
         self.prev_result = result
         return result
 
-    def cpu_ids(self) -> List[int]:
+    def cpu_ids(self) -> list[int]:
         """
         return the cpu id of this machine
         """
@@ -68,7 +68,7 @@ class RaplCPUNodeEnergyMonitor(NodeEnergyMonitor):
         return cpu_id_list
 
 
-    def get_socket_ids(self) -> List[int]:
+    def get_socket_ids(self) -> list[int]:
         """
         return cpu socket id present on the machine
         """
@@ -78,7 +78,7 @@ class RaplCPUNodeEnergyMonitor(NodeEnergyMonitor):
             socket_id_list.append(int(api_file.readline().strip()))
         return list(set(socket_id_list))
 
-    def _get_socket_directory_names(self) -> List[Tuple[str, int]]:
+    def _get_socket_directory_names(self) -> list[tuple[str, int]]:
         """
         :return (str, int): directory name, rapl_id
         """
@@ -147,22 +147,21 @@ class CrayNodeEnergyMonitor(NodeEnergyMonitor):
     """
     def __init__(self, debug: bool = True):
         super().__init__(debug=debug)
-        self._sys_file = open("sys/cray/pm_counters/energy", "r")
-        self.prev_result = None
-        self.prev_result = self.report()
+        self._sys_file = open("/sys/cray/pm_counters/energy", "r")
+        self.prev_time = 0
+        self.prev_energy = 0
+        self.report()
 
     def report(self):
         self._sys_file.seek(0, 0)
-        energy_j = float(self.sys_file.readline().partition(" ")[0])
+        line = self._sys_file.readline()
+        energy_j = float(line.partition(" ")[0])
         energy_uj = j_to_uj(energy_j)
-        end_time = time.clock_gettime()
+        end_time = time.clock_gettime(time.CLOCK_MONOTONIC)
 
-        result = Result(0, end_time, energy_uj)
-        if self.prev_result is None:
-            return result
-        
-        result = result - self.prev_result
-        self.prev_result = result
+        result = Result(self.prev_time, end_time, energy_uj - self.prev_energy)
+        self.prev_time = end_time
+        self.prev_energy = energy_uj
         return result
 
 class NVMLGPUEnergyMonitor(NodeEnergyMonitor):

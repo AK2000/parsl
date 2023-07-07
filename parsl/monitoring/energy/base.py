@@ -1,5 +1,5 @@
 from abc import ABCMeta, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 
 from parsl.utils import RepresentationMixin
 
@@ -8,7 +8,7 @@ class Result:
     start_time: int
     end_time: int
     total_energy: int
-    devices: dict[str, Result] = field(default_factory=dict)
+    devices: dict = field(default_factory=dict)
 
     def __add__(self, other):
         start_time = min(self.start_time, other.start_time)
@@ -18,11 +18,14 @@ class Result:
     def __sub__(self, other):
         start_time = other.end_time
         devices = dict()
-        for name, device in self.deivces.items():
+        for name, device in self.devices.items():
             devices[name] = device - other.devices[name]
         total_energy = self.total_energy - other.total_energy
 
         return Result(start_time, self.end_time, total_energy, devices)
+
+    def dict(self):
+        return asdict(self)
 
 
 class NodeEnergyMonitor(RepresentationMixin, metaclass=ABCMeta):
@@ -49,6 +52,7 @@ class JobEnergyMonitor(RepresentationMixin, metaclass=ABCMeta):
 
     @abstractmethod
     def add(self, jobid: str) -> None:
+        pass
 
 def get_launch_command():
     return ""

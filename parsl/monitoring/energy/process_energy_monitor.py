@@ -1,8 +1,10 @@
+import argparse
 import logging
 import json
 import queue
 import time
 import threading
+import os
 
 from parsl.monitoring.energy.base import NodeEnergyMonitor, Result
 import parsl.monitoring.energy.node_monitors as NodeEnergyMonitors
@@ -10,7 +12,7 @@ from parsl.monitoring.message_type import MessageType
 from parsl.monitoring.radios import MonitoringRadio, UDPRadio, HTEXRadio, FilesystemRadio
 
 
-def start_file_logger(filename, rank, name='parsl', level=logging.DEBUG, format_string=None):
+def start_file_logger(filename, rank, name=__name__, level=logging.DEBUG, format_string=None):
     """Add a stream log handler.
 
     Args:
@@ -55,7 +57,7 @@ def prepare_htex_radio(kill_event,
         exit(5)
     
     result_q_url = "tcp://{}:{}".format(ix_address, result_port)
-    logging.info("Result url : {}".format{result_q_url})
+    logging.info("Result url : {}".format(result_q_url))
 
     context = zmq.Context()
     result_outgoing = context.socket(zmq.DEALER)
@@ -137,6 +139,8 @@ def run(energy_monitor: NodeEnergyMonitor,
 
     from parsl.utils import setproctitle
 
+    logger = logging.getLogger(__name__)
+
     setproctitle("parsl: block energy monitor")
 
     if not log_only:
@@ -151,12 +155,12 @@ def run(energy_monitor: NodeEnergyMonitor,
             radio = FilesystemRadio(monitoring_url=monitoring_hub_url,
                                     source_id=block_id, run_dir=run_dir)
         else:
-        raise RuntimeError(f"Unknown radio mode: {radio_mode}")
+            raise RuntimeError(f"Unknown radio mode: {radio_mode}")
 
-    logging.debug("start of energy monitor")
+    logger.debug("start of energy monitor")
 
     def measure_and_prepare():
-        d = energy_monitor.report().asdict()
+        d = energy_monitor.report().dict()
         d["devices"] = json.dumps(d["devices"])
         d["run_id"] = run_id
         d["block_id"] = block_id
@@ -167,34 +171,38 @@ def run(energy_monitor: NodeEnergyMonitor,
     next_send = time.time()
     accumulate_dur = 5.0  # TODO: make configurable?
 
-    while not terminate_event.is_set():
-        logging.debug("start of monitoring loop")
+    while True:
+        logger.info("start of monitoring loop")
         try:
             if time.time() >= next_send:
                 d = measure_and_prepare()
-                logging.debug("Sending intermediate energy message")
+                logger.info("Sending intermediate energy message")
                 if not log_only:
                     radio.send((MessageType.ENERGY_INFO, d))
+                else:
+                    logger.info("Recorded Energy information\n"\
+                                + "\n".join([f"\t{k}: {v}" for k,v in d.items()]))
                 next_send += sleep_dur
         except Exception:
-            logging.exception("Exception getting the energy usage. Not sending usage to Hub", exc_info=True)
-        logging.debug("sleeping")
+            logger.exception("Exception getting the energy usage. Not sending usage to Hub", exc_info=True)
+        logger.debug("sleeping")
 
         # wait either until approx next send time, or the accumulation period
         # so the accumulation period will not be completely precise.
         # but before this, the sleep period was also not completely precise.
         # with a minimum floor of 0 to not upset wait
 
-        terminate_event.wait(max(0, min(next_send - time.time(), accumulate_dur)))
+        #terminate_event.wait(max(0, min(next_send - time.time(), accumulate_dur)))
+        time.sleep(max(0, min(next_send - time.time(), accumulate_dur)))
 
-    logging.debug("Sending final energy message")
+    logger.debug("Sending final energy message")
     try:
         d = measure_and_prepare()
         if not log_only:
             radio.send((MessageType.ENERGY_INFO, d))
     except Exception:
-        logging.exception("Exception getting the energy usage. Not sending final usage to Hub", exc_info=True)
-    logging.debug("End of monitoring helper")
+        logger.exception("Exception getting the energy usage. Not sending final usage to Hub", exc_info=True)
+    logger.debug("End of monitoring helper")
 
 
 if __name__ == "__main__":
@@ -206,11 +214,11 @@ if __name__ == "__main__":
     parser.add_argument("-i", "--run_id", help="Run id")
     parser.add_argument("-b", "--block_id", default=None,
                         help="Block identifier for Manager")
-    parser.add_argument("-r", "--radio_mode", choices=["udp", "htex", "filesystem"]
+    parser.add_argument("-r", "--radio_mode", choices=["udp", "htex", "filesystem"],
                         help="Which radio to use to communicate with monitoring hub")
     parser.add_argument("-l", "--logdir", default="process_worker_pool_logs",
                         help="Process worker pool log directory")
-    parser.add_argument("-d", "--debug", type=int, help="Create debug log messages")
+    parser.add_argument("-d", "--debug", action="store_true", help="Create debug log messages")
     parser.add_argument("-s", "--sleep_dur", type=int, help="Sleep time in between monitoring")
     parser.add_argument("--rundir", help="Place to create file system radio info")
     parser.add_argument("-a", "--addresses", default='',
@@ -221,7 +229,7 @@ if __name__ == "__main__":
                         help="Poll period used in milliseconds")
     parser.add_argument("--result_port",
                         help="Result port for posting results to the interchange")
-    parser.add_argument("--log_only", help="Only write logs, do not send data to monitoring DB")
+    parser.add_argument("--log_only", action="store_true", help="Only write logs, do not send data to monitoring DB")
     args = parser.parse_args()
 
     os.makedirs(os.path.join(args.logdir, "block-{}".format(args.block_id)), exist_ok=True)
@@ -242,7 +250,7 @@ if __name__ == "__main__":
         if args.radio_mode == "htex" and not args.log_only:
             kill_event = threading.Event()
             prepare_htex_radio(kill_event,
-                               args.addresses
+                               args.addresses,
                                args.result_port,
                                args.address_probe_timeout,
                                args.poll)
@@ -254,7 +262,7 @@ if __name__ == "__main__":
             radio_mode=args.radio_mode,
             logging_level=logging.DEBUG if args.debug is True else logging.INFO,
             sleep_dur=args.sleep_dur,
-            run_dir=args.run_dir,
+            run_dir=args.rundir,
             log_only=args.log_only)
 
     except Exception:
@@ -265,4 +273,5 @@ if __name__ == "__main__":
     else:
         logger.info("Process energy monitor exiting normally")
         print("Process energy monitor exiting normally")
-        kill_event.set()
+        if args.radio_mode == "htex" and not args.log_only:
+            kill_event.set()
