@@ -1106,6 +1106,10 @@ class DataFlowKernel:
             executor.run_dir = self.run_dir
             executor.hub_address = self.hub_address
             executor.hub_port = self.hub_interchange_port
+
+            if self.monitoring is not None and self.monitoring.resource_monitoring_enabled and executor.monitor_resources():
+                executor.resource_monitoring_interval = self.monitoring.resource_monitoring_interval
+
             if hasattr(executor, 'provider'):
                 if hasattr(executor.provider, 'script_dir'):
                     executor.provider.script_dir = os.path.join(self.run_dir, 'submit_scripts')

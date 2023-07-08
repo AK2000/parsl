@@ -31,6 +31,8 @@ from parsl.multiprocessing import ForkProcess
 from parsl.utils import RepresentationMixin
 from parsl.providers import LocalProvider
 
+from parsl.monitoring.energy.base import NodeEnergyMonitor
+
 logger = logging.getLogger(__name__)
 
 _start_methods = ['fork', 'spawn', 'thread']
@@ -210,7 +212,8 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin):
                  poll_period: int = 10,
                  address_probe_timeout: Optional[int] = None,
                  worker_logdir_root: Optional[str] = None,
-                 block_error_handler: bool = True):
+                 block_error_handler: bool = True,
+                 energy_monitor: Optional[str] = None):
 
         logger.debug("Initializing HighThroughputExecutor")
 
@@ -298,8 +301,21 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin):
                                "--cpu-affinity {cpu_affinity} "
                                "--available-accelerators {accelerators} "
                                "--start-method {start_method}")
-
-    radio_mode = "htex"
+        
+        self.monitor_energy = (energy_monitor is not None)
+        if self.monitor_energy
+            self.monitor_cmd = ("process_energy_monitor.py -m {debug} "
+                                "-m {energy_monitor}"
+                                "-u {url} "
+                                "-i {run_id} "
+                                "-b {{block_id}}" 
+                                "-l {logdir} "
+                                "-s {sleep_dur} "
+                                "--rundir {rundir} "
+                                "-r {radio_mode} "
+                                "-a {addresses} "
+                                "--poll {poll_period} "
+                                "--result_port {result_port}")
 
     def initialize_scaling(self):
         """ Compose the launch command and call the scale_out
@@ -334,6 +350,20 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin):
                                        cpu_affinity=self.cpu_affinity,
                                        accelerators=" ".join(self.available_accelerators),
                                        start_method=self.start_method)
+        if self.monitor_energy:
+            monitoring_hub_url = "udp://{}:{}".format(self.hub_address, self.hub_port)
+            m_cmd = self.monitor_cmd.format(debug=debug_opts,
+                                            energy_monitor=self.energy_monitor,
+                                            url=monitoring_hub_url,
+                                            run_id=self.run_id,
+                                            logdir=worker_logdir,
+                                            sleep_dur=self.resource_monitoring_interval,
+                                            rundir=self.run_dir,
+                                            radio_mode="htex",
+                                            addresses=self.all_addresses,
+                                            poll_period=self.poll_period,
+                                            result_port=self.worker_result_port)
+            l_cmd = f"{m_cmd & l_cmd}"
         self.launch_cmd = l_cmd
         logger.debug("Launch command: {}".format(self.launch_cmd))
 
