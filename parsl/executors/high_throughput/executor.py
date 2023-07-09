@@ -5,6 +5,7 @@ import threading
 import queue
 import datetime
 import pickle
+import uuid
 import warnings
 from multiprocessing import Queue
 from typing import Dict, Sequence  # noqa F401 (used in type annotation)
@@ -300,21 +301,24 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin):
                                "--hb_threshold={heartbeat_threshold} "
                                "--cpu-affinity {cpu_affinity} "
                                "--available-accelerators {accelerators} "
+                               "--uid {{uid}} "
                                "--start-method {start_method}")
         
+        self.energy_monitor = energy_monitor
         self.monitor_energy = (energy_monitor is not None)
-        if self.monitor_energy
-            self.monitor_cmd = ("process_energy_monitor.py -m {debug} "
-                                "-m {energy_monitor}"
+        if self.monitor_energy:
+            self.monitor_cmd = ("process_energy_monitor.py {debug} "
+                                "-m {energy_monitor} "
                                 "-u {url} "
                                 "-i {run_id} "
-                                "-b {{block_id}}" 
+                                "-b {{block_id}} " 
                                 "-l {logdir} "
                                 "-s {sleep_dur} "
                                 "--rundir {rundir} "
                                 "-r {radio_mode} "
                                 "-a {addresses} "
                                 "--poll {poll_period} "
+                                "--uid {{uid}} "
                                 "--result_port {result_port}")
 
     def initialize_scaling(self):
@@ -351,19 +355,18 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin):
                                        accelerators=" ".join(self.available_accelerators),
                                        start_method=self.start_method)
         if self.monitor_energy:
-            monitoring_hub_url = "udp://{}:{}".format(self.hub_address, self.hub_port)
             m_cmd = self.monitor_cmd.format(debug=debug_opts,
                                             energy_monitor=self.energy_monitor,
-                                            url=monitoring_hub_url,
+                                            url=self.monitoring_hub_url,
                                             run_id=self.run_id,
                                             logdir=worker_logdir,
                                             sleep_dur=self.resource_monitoring_interval,
                                             rundir=self.run_dir,
-                                            radio_mode="htex",
+                                            radio_mode=self.radio_mode,
                                             addresses=self.all_addresses,
                                             poll_period=self.poll_period,
                                             result_port=self.worker_result_port)
-            l_cmd = f"{m_cmd & l_cmd}"
+            l_cmd = f"{m_cmd} & {l_cmd}"
         self.launch_cmd = l_cmd
         logger.debug("Launch command: {}".format(self.launch_cmd))
 
@@ -739,7 +742,9 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin):
     def _get_launch_command(self, block_id: str) -> str:
         if self.launch_cmd is None:
             raise ScalingFailed(self, "No launch command")
-        launch_cmd = self.launch_cmd.format(block_id=block_id)
+
+        uid = str(uuid.uuid4()).split('-')[-1] 
+        launch_cmd = self.launch_cmd.format(block_id=block_id, uid=uid)
         return launch_cmd
 
     def shutdown(self):

@@ -256,7 +256,7 @@ class Database:
         )
 
     class Energy(Base):
-        __table__ = ENERGY
+        __tablename__ = ENERGY
         run_id = Column('run_id', Text, nullable=False)
         block_id = Column('block_id', Text, nullable=False)
         hostname = Column('hostname', Text, nullable=False)
@@ -267,10 +267,8 @@ class Database:
             'resource_monitoring_interval', Float, nullable=True)
         devices = Column('devices', Text, nullable=True)
         __table_args__ = (
-            PrimaryKeyConstraint('run_id', 'block_id', 'end_time'),
+            PrimaryKeyConstraint('run_id', 'block_id', 'hostname', 'end_time'),
         )
-
-
 
 class DatabaseManager:
     def __init__(self,
@@ -576,7 +574,11 @@ class DatabaseManager:
                 Energy Info Messages
 
                 """
-                # TODO
+                energy_info_messages = self._get_messages_in_batch(self.pending_energy_queue)
+                if energy_info_messages:
+                    logger.debug(
+                        "Got {} messages from energy queue".format(len(energy_info_messages)))
+                    self._insert(table=ENERGY, messages=energy_info_messages)
 
             except Exception:
                 logger.exception("Exception in db loop: this might have been a malformed message, or some other error. monitoring data may have been lost")

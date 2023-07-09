@@ -22,8 +22,8 @@ class RaplCPUNodeEnergyMonitor(NodeEnergyMonitor):
         self._socket_ids = self.get_socket_ids()
         self._pkg_files = self.get_pkg_files()
         self._dram_files = self.get_dram_files()
-        self.prev_result = None
-        self.prev_result = self.report()
+        self.prev_reading = None
+        self.report()
 
     def report(self):
         total_energy = 0
@@ -42,13 +42,14 @@ class RaplCPUNodeEnergyMonitor(NodeEnergyMonitor):
             dram_file.seek(0, 0)
             devices[self._socket_ids[i]].devices = {"dram": Result(start_time, end_time, float(device_file.readline()))}
 
-        result = Result(start_time, end_time, total_energy, devices)
+        reading = Result(start_time, end_time, total_energy, devices)
 
-        if self.prev_result is None:
-            return result
-        
-        result = result - self.prev_result
-        self.prev_result = result
+        if self.prev_reading is not None:
+            result = reading  - self.prev_reading
+        else:
+            result = reading
+
+        self.prev_reading = reading
         return result
 
     def cpu_ids(self) -> list[int]:
@@ -168,7 +169,6 @@ class NVMLGPUEnergyMonitor(NodeEnergyMonitor):
     """ Monitor the energy of NVidia GPUs using Nvidia NVML
     Requires NVML Python library.
     """
-
     def __init__(self, debug: bool = True):
         super().__init__(debug=debug)
 
@@ -184,22 +184,29 @@ class PapiEnergyMonitor(NodeEnergyMonitor):
     def __init__(self, debug: bool = True):
         super().__init__(debug=debug)
 
-    def record(self):
-        pass
-
     def report(self):
         pass
 
-class AggregateEnergyMonitor(NodeEnergyMonitor):
+class AggregateNodeEnergyMonitor(NodeEnergyMonitor):
     """ Node energy monitor to aggregate energy collection and 
     reporting from several different monitors.
     """
-
     def __init__(self, debug: bool = True):
         super().__init__(debug=debug)
 
-    def record(self):
-        pass
-
     def report(self):
         pass
+
+class FakeNodeEnergyMonitor(NodeEnergyMonitor):
+    """ Test energy monitor to mimic the behavior of an energy
+    monitor without requiring any permissions
+    """
+    def __init__(self, debug: bool = True):
+        super().__init__(debug=debug)
+        self.prev_time = time.clock_gettime(time.CLOCK_MONOTONIC)
+
+    def report(self):
+        end_time = time.clock_gettime(time.CLOCK_MONOTONIC)
+        result = Result(self.prev_time, end_time, 170000)
+        self.prev_time = end_time
+        return result

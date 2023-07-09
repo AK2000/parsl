@@ -1106,8 +1106,9 @@ class DataFlowKernel:
             executor.run_dir = self.run_dir
             executor.hub_address = self.hub_address
             executor.hub_port = self.hub_interchange_port
-
+            
             if self.monitoring is not None and self.monitoring.resource_monitoring_enabled and executor.monitor_resources():
+                executor.monitoring_hub_url = self.monitoring.monitoring_hub_url
                 executor.resource_monitoring_interval = self.monitoring.resource_monitoring_interval
 
             if hasattr(executor, 'provider'):

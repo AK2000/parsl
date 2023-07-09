@@ -47,6 +47,7 @@ setup(
     python_requires=">=3.8.0",
     install_requires=install_requires,
     scripts = ['parsl/executors/high_throughput/process_worker_pool.py',
+               'parsl/monitoring/energy/process_energy_monitor.py',
                'parsl/executors/workqueue/exec_parsl_function.py',
                'parsl/executors/workqueue/parsl_coprocess.py',
     ],

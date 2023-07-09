@@ -144,6 +144,8 @@ class UDPRadio(MonitoringRadio):
         except Exception:
             raise Exception("Failed to parse monitoring url: {}".format(monitoring_url))
 
+        logger.info(f"Initialized UDP Radio at {monitoring_url}")
+
         self.sock = socket.socket(socket.AF_INET,
                                   socket.SOCK_DGRAM,
                                   socket.IPPROTO_UDP)  # UDP

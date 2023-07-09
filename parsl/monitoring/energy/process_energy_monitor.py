@@ -4,7 +4,10 @@ import json
 import queue
 import time
 import threading
+import uuid
 import os
+
+from parsl.process_loggers import wrap_with_logs
 
 from parsl.monitoring.energy.base import NodeEnergyMonitor, Result
 import parsl.monitoring.energy.node_monitors as NodeEnergyMonitors
@@ -38,7 +41,8 @@ def start_file_logger(filename, rank, name=__name__, level=logging.DEBUG, format
     logger.addHandler(handler)
     return logger
 
-def prepare_htex_radio(kill_event, 
+def prepare_htex_radio(uid,
+                       kill_event, 
                        addresses="127.0.0.1",
                        result_port="50098",
                        address_probe_timeout=30,
@@ -52,19 +56,19 @@ def prepare_htex_radio(kill_event,
         if not ix_address:
             raise Exception("No viable address found")
     except:
-        logging.exception("Caught exception while trying to determine viable address to interchange")
+        logger.exception("Caught exception while trying to determine viable address to interchange")
         print("Failed to find a viable address to connect to interchange. Exiting")
         exit(5)
     
     result_q_url = "tcp://{}:{}".format(ix_address, result_port)
-    logging.info("Result url : {}".format(result_q_url))
+    logger.info("Result url : {}".format(result_q_url))
 
     context = zmq.Context()
     result_outgoing = context.socket(zmq.DEALER)
     result_outgoing.setsockopt(zmq.IDENTITY, uid.encode('utf-8'))
     result_outgoing.setsockopt(zmq.LINGER, 0)
     result_outgoing.connect(result_q_url)
-    logging.info("Monitor connected to interchange")
+    logger.info("Monitor connected to interchange")
 
     @wrap_with_logs
     def push_results(pending_results_queue, result_outgoing, poll_period, max_queue_size, kill_event):
@@ -76,10 +80,10 @@ def prepare_htex_radio(kill_event,
               Event to let the thread know when it is time to die.
         """
 
-        logging.debug("Starting result push thread")
+        logger.debug("Starting result push thread")
 
         push_poll_period = max(10, poll_period) / 1000    # push_poll_period must be atleast 10 ms
-        logging.debug("push poll period: {}".format(push_poll_period))
+        logger.debug("push poll period: {}".format(push_poll_period))
 
         last_beat = time.time()
         last_result_beat = time.time()
@@ -87,28 +91,28 @@ def prepare_htex_radio(kill_event,
 
         while not kill_event.is_set():
             try:
-                logging.debug("Starting pending_result_queue get")
+                logger.debug("Starting pending_result_queue get")
                 r = pending_result_queue.get(block=True, timeout=push_poll_period)
-                logging.debug("Got a result item")
+                logger.debug("Got a result item")
                 items.append(r)
             except queue.Empty:
-                logging.debug("pending_result_queue get timeout without result item")
+                logger.debug("pending_result_queue get timeout without result item")
             except Exception as e:
-                logging.exception("Got an exception: {}".format(e))
+                logger.exception("Got an exception: {}".format(e))
 
             if len(items) >= max_queue_size or time.time() > last_beat + push_poll_period:
                 last_beat = time.time()
                 if items:
-                    logging.debug(f"Result send: Pushing {len(items)} items")
+                    logger.debug(f"Result send: Pushing {len(items)} items")
                     result_outgoing.send_multipart(items)
-                    logging.debug("Result send: Pushed")
+                    logger.debug("Result send: Pushed")
                     items = []
                 else:
-                    logging.debug("Result send: No items to push")
+                    logger.debug("Result send: No items to push")
             else:
-                logging.debug(f"Result send: check condition not met - deferring {len(items)} result items")
+                logger.debug(f"Result send: check condition not met - deferring {len(items)} result items")
 
-        logging.critical("Exiting")
+        logger.critical("Exiting")
 
     
     pending_result_queue = queue.Queue()
@@ -216,7 +220,7 @@ if __name__ == "__main__":
                         help="Block identifier for Manager")
     parser.add_argument("-r", "--radio_mode", choices=["udp", "htex", "filesystem"],
                         help="Which radio to use to communicate with monitoring hub")
-    parser.add_argument("-l", "--logdir", default="process_worker_pool_logs",
+    parser.add_argument("-l", "--logdir", default="process_energy_monitor_logs",
                         help="Process worker pool log directory")
     parser.add_argument("-d", "--debug", action="store_true", help="Create debug log messages")
     parser.add_argument("-s", "--sleep_dur", type=int, help="Sleep time in between monitoring")
@@ -230,6 +234,8 @@ if __name__ == "__main__":
     parser.add_argument("--result_port",
                         help="Result port for posting results to the interchange")
     parser.add_argument("--log_only", action="store_true", help="Only write logs, do not send data to monitoring DB")
+    parser.add_argument("--uid", default=str(uuid.uuid4()).split('-')[-1],
+                        help="Unique identifier string for Manager")
     args = parser.parse_args()
 
     os.makedirs(os.path.join(args.logdir, "block-{}".format(args.block_id)), exist_ok=True)
@@ -243,13 +249,15 @@ if __name__ == "__main__":
         logger.info("Block ID: {}".format(args.block_id))
         logger.info("Node Energy Monitor: {}".format(args.monitor))
         logger.info("Radio Mode: {}".format(args.radio_mode))
+        logger.info("Monitoring Hub URL: {}".format(args.url))
 
         monitor_cls = getattr(NodeEnergyMonitors, args.monitor)
         monitor = monitor_cls(debug=args.debug)
 
         if args.radio_mode == "htex" and not args.log_only:
             kill_event = threading.Event()
-            prepare_htex_radio(kill_event,
+            prepare_htex_radio(args.uid,
+                               kill_event,
                                args.addresses,
                                args.result_port,
                                args.address_probe_timeout,
