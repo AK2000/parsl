@@ -318,7 +318,7 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin):
                                 "-r {radio_mode} "
                                 "-a {addresses} "
                                 "--poll {poll_period} "
-                                "--uid {{uid}} "
+                                "--manager_id {{uid}} "
                                 "--result_port {result_port}")
 
     def initialize_scaling(self):
@@ -382,6 +382,7 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin):
                 raise e
         return block_ids
 
+    radio_mode: str = "htex"
     def start(self):
         """Create the Interchange process and connect to it.
         """

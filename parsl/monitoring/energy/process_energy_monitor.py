@@ -47,7 +47,7 @@ def prepare_htex_radio(uid,
                        result_port="50098",
                        address_probe_timeout=30,
                        poll_period=10,
-                       max_queue_size=64):
+                       max_queue_size=10):
     import zmq
     from parsl.executors.high_throughput.probe import probe_addresses
 
@@ -123,7 +123,7 @@ def prepare_htex_radio(uid,
                                                   max_queue_size,
                                                   kill_event),
                                             name="Result-Pusher")
-
+    result_pusher_thread.start()
 
     import parsl.executors.high_throughput.monitoring_info as mi
     mi.result_queue = pending_result_queue
@@ -136,6 +136,7 @@ def run(energy_monitor: NodeEnergyMonitor,
         logging_level: int,
         sleep_dur: float,
         run_dir: str,
+        manager_id: str,
         log_only: bool = False) -> None:
     
     import logging
@@ -151,13 +152,13 @@ def run(energy_monitor: NodeEnergyMonitor,
         radio: MonitoringRadio
         if radio_mode == "udp":
             radio = UDPRadio(monitoring_hub_url,
-                            source_id=block_id)
+                            source_id=manager_id)
         elif radio_mode == "htex":
             radio = HTEXRadio(monitoring_hub_url,
-                            source_id=block_id)
+                            source_id=manager_id)
         elif radio_mode == "filesystem":
             radio = FilesystemRadio(monitoring_url=monitoring_hub_url,
-                                    source_id=block_id, run_dir=run_dir)
+                                    source_id=manager_id, run_dir=run_dir)
         else:
             raise RuntimeError(f"Unknown radio mode: {radio_mode}")
 
@@ -229,12 +230,14 @@ if __name__ == "__main__":
                         help="Comma separated list of addresses at which the interchange could be reached")
     parser.add_argument("--address_probe_timeout", default=30,
                         help="Timeout to probe for viable address to interchange. Default: 30s")
-    parser.add_argument("--poll", default=10,
+    parser.add_argument("--poll", default=10, type=int,
                         help="Poll period used in milliseconds")
     parser.add_argument("--result_port",
                         help="Result port for posting results to the interchange")
     parser.add_argument("--log_only", action="store_true", help="Only write logs, do not send data to monitoring DB")
     parser.add_argument("--uid", default=str(uuid.uuid4()).split('-')[-1],
+                        help="Unique identifier string for monitor")
+    parser.add_argument("--manager_id",
                         help="Unique identifier string for Manager")
     args = parser.parse_args()
 
@@ -271,6 +274,7 @@ if __name__ == "__main__":
             logging_level=logging.DEBUG if args.debug is True else logging.INFO,
             sleep_dur=args.sleep_dur,
             run_dir=args.rundir,
+            manager_id=args.manager_id,
             log_only=args.log_only)
 
     except Exception:
