@@ -67,8 +67,8 @@ class ClusterProvider(ExecutionProvider):
         self.launcher = launcher
         self.walltime = walltime
         self.cmd_timeout = cmd_timeout
-        if not isinstance(self.launcher, Launcher):
-            raise BadLauncher(self.launcher)
+        #if not isinstance(self.launcher, Launcher):
+        #    raise BadLauncher(self.launcher)
 
         self.script_dir = None
 
