@@ -7,8 +7,9 @@ import threading
 import uuid
 import os
 
-from parsl.process_loggers import wrap_with_logs
+import daemon
 
+from parsl.process_loggers import wrap_with_logs
 from parsl.monitoring.energy.base import NodeEnergyMonitor, Result
 import parsl.monitoring.energy.node_monitors as NodeEnergyMonitors
 from parsl.monitoring.message_type import MessageType
@@ -266,16 +267,22 @@ if __name__ == "__main__":
                                args.address_probe_timeout,
                                args.poll)
 
-        run(monitor,
-            monitoring_hub_url=args.url,
-            block_id=args.block_id,
-            run_id=args.run_id,
-            radio_mode=args.radio_mode,
-            logging_level=logging.DEBUG if args.debug is True else logging.INFO,
-            sleep_dur=args.sleep_dur,
-            run_dir=args.rundir,
-            manager_id=args.manager_id,
-            log_only=args.log_only)
+        # Start as daemon so it does not affect the length of the job
+        with daemon.DaemonContext(
+                working_directory=args.rundir,
+                detach_process=True,
+            ):
+            
+            run(monitor,
+                monitoring_hub_url=args.url,
+                block_id=args.block_id,
+                run_id=args.run_id,
+                radio_mode=args.radio_mode,
+                logging_level=logging.DEBUG if args.debug is True else logging.INFO,
+                sleep_dur=args.sleep_dur,
+                run_dir=args.rundir,
+                manager_id=args.manager_id,
+                log_only=args.log_only)
 
     except Exception:
         logger.critical("Process energy monitor exiting with an exception", exc_info=True)
