@@ -245,33 +245,32 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(args.logdir, "block-{}".format(args.block_id)), exist_ok=True)
 
     try:
-        logger = start_file_logger('{}/block-{}/energy.log'.format(args.logdir, args.block_id),
-                                   0,
-                                   level=logging.DEBUG if args.debug is True else logging.INFO)
-        logger.info("Debug logging: {}".format(args.debug))
-        logger.info("Log dir: {}".format(args.logdir))
-        logger.info("Block ID: {}".format(args.block_id))
-        logger.info("Node Energy Monitor: {}".format(args.monitor))
-        logger.info("Radio Mode: {}".format(args.radio_mode))
-        logger.info("Monitoring Hub URL: {}".format(args.url))
-
-        monitor_cls = getattr(NodeEnergyMonitors, args.monitor)
-        monitor = monitor_cls(debug=args.debug)
-
-        if args.radio_mode == "htex" and not args.log_only:
-            kill_event = threading.Event()
-            prepare_htex_radio(args.uid,
-                               kill_event,
-                               args.addresses,
-                               args.result_port,
-                               args.address_probe_timeout,
-                               args.poll)
-
-        # Start as daemon so it does not affect the length of the job
         with daemon.DaemonContext(
                 working_directory=args.rundir,
-                detach_process=True,
+                detach_process=True
             ):
+
+            logger = start_file_logger('{}/block-{}/energy.log'.format(args.logdir, args.block_id),
+                                       0,
+                                       level=logging.DEBUG if args.debug is True else logging.INFO)
+            logger.info("Debug logging: {}".format(args.debug))
+            logger.info("Log dir: {}".format(args.logdir))
+            logger.info("Block ID: {}".format(args.block_id))
+            logger.info("Node Energy Monitor: {}".format(args.monitor))
+            logger.info("Radio Mode: {}".format(args.radio_mode))
+            logger.info("Monitoring Hub URL: {}".format(args.url))
+
+            monitor_cls = getattr(NodeEnergyMonitors, args.monitor)
+            monitor = monitor_cls(debug=args.debug)
+
+            if args.radio_mode == "htex" and not args.log_only:
+                kill_event = threading.Event()
+                prepare_htex_radio(args.uid,
+                                   kill_event,
+                                   args.addresses,
+                                   args.result_port,
+                                   args.address_probe_timeout,
+                                   args.poll)
             
             run(monitor,
                 monitoring_hub_url=args.url,
