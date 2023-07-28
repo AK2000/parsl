@@ -41,6 +41,38 @@ NODE = 'node'            # Node table include node info
 BLOCK = 'block'          # Block table include the status for block polling
 ENERGY = 'energy'
 
+def start_file_logger(filename: str, name: str = 'monitoring', level: int = logging.DEBUG, format_string: Optional[str] = None) -> logging.Logger:
+    """Add a stream log handler.
+
+    Parameters
+    ---------
+
+    filename: string
+        Name of the file to write logs to. Required.
+    name: string
+        Logger name.
+    level: logging.LEVEL
+        Set the logging level. Default=logging.DEBUG
+        - format_string (string): Set the format string
+    format_string: string
+        Format string to use.
+
+    Returns
+    -------
+        None.
+    """
+    if format_string is None:
+        format_string = "%(asctime)s.%(msecs)03d %(name)s:%(lineno)d [%(levelname)s]  %(message)s"
+
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    logger.propagate = False
+    handler = logging.FileHandler(filename)
+    handler.setLevel(level)
+    formatter = logging.Formatter(format_string, datefmt='%Y-%m-%d %H:%M:%S')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    return logger
 
 class Database:
 
@@ -145,7 +177,7 @@ class Database:
         task_id = Column('task_id', Integer, nullable=False)
         run_id = Column('run_id', Text, nullable=False)
         task_depends = Column('task_depends', Text, nullable=True)
-        task_func_name = Column('task_func_name', Text, nullable=False)
+        task_func_name = Column('task_func_name', Text, nullable=True)
         task_memoize = Column('task_memoize', Text, nullable=False)
         task_hashsum = Column('task_hashsum', Text, nullable=True, index=True)
         task_inputs = Column('task_inputs', Text, nullable=True)
@@ -284,13 +316,12 @@ class DatabaseManager:
         self.logdir = logdir
         os.makedirs(self.logdir, exist_ok=True)
 
-        logger.propagate = False
+        self.logger = start_file_logger("{}/database_manager.log".format(logdir),
+                                        name="database_manager",
+                                        level=logging_level)
 
-        set_file_logger("{}/database_manager.log".format(self.logdir), level=logging_level,
-                        format_string="%(asctime)s.%(msecs)03d %(name)s:%(lineno)d [%(levelname)s] [%(threadName)s %(thread)d] %(message)s",
-                        name="database_manager")
-
-        logger.debug("Initializing Database Manager process")
+        self.logger.propagate = False
+        self.logger.debug("Initializing Database Manager process")
 
         self.db = Database(db_url)
         self.batching_interval = batching_interval
@@ -386,7 +417,7 @@ class DatabaseManager:
 
             """
             try:
-                logger.debug("""Checking STOP conditions: {}, {}, {}, {}, {}, {}, {}, {}, {}""".format(
+                self.logger.debug("""Checking STOP conditions: {}, {}, {}, {}, {}, {}, {}, {}, {}""".format(
                                   self._kill_event.is_set(),
                                   self.pending_priority_queue.qsize() != 0, self.pending_resource_queue.qsize() != 0,
                                   self.pending_node_queue.qsize() != 0, self.pending_block_queue.qsize() != 0,
@@ -408,19 +439,19 @@ class DatabaseManager:
                 # Get a batch of priority messages
                 priority_messages = self._get_messages_in_batch(self.pending_priority_queue)
                 if priority_messages:
-                    logger.debug(
+                    self.logger.debug(
                         "Got {} messages from priority queue".format(len(priority_messages)))
                     task_info_update_messages, task_info_insert_messages, task_info_all_messages = [], [], []
                     try_update_messages, try_insert_messages, try_all_messages = [], [], []
                     for msg_type, msg in priority_messages:
                         if msg_type == MessageType.WORKFLOW_INFO:
                             if "python_version" in msg:   # workflow start message
-                                logger.debug(
+                                self.logger.debug(
                                     "Inserting workflow start info to WORKFLOW table")
                                 self._insert(table=WORKFLOW, messages=[msg])
                                 self.workflow_start_message = msg
                             else:                         # workflow end message
-                                logger.debug(
+                                self.logger.debug(
                                     "Updating workflow end info to WORKFLOW table")
                                 self._update(table=WORKFLOW,
                                              columns=['run_id', 'tasks_failed_count',
@@ -451,8 +482,8 @@ class DatabaseManager:
                         else:
                             raise RuntimeError("Unexpected message type {} received on priority queue".format(msg_type))
 
-                    logger.debug("Updating and inserting TASK_INFO to all tables")
-                    logger.debug("Updating {} TASK_INFO into workflow table".format(len(task_info_update_messages)))
+                    self.logger.debug("Updating and inserting TASK_INFO to all tables")
+                    self.logger.debug("Updating {} TASK_INFO into workflow table".format(len(task_info_update_messages)))
                     self._update(table=WORKFLOW,
                                  columns=['run_id', 'tasks_failed_count',
                                           'tasks_completed_count'],
@@ -460,11 +491,11 @@ class DatabaseManager:
 
                     if task_info_insert_messages:
                         self._insert(table=TASK, messages=task_info_insert_messages)
-                        logger.debug(
+                        self.logger.debug(
                             "There are {} inserted task records".format(len(inserted_tasks)))
 
                     if task_info_update_messages:
-                        logger.debug("Updating {} TASK_INFO into task table".format(len(task_info_update_messages)))
+                        self.logger.debug("Updating {} TASK_INFO into task table".format(len(task_info_update_messages)))
                         self._update(table=TASK,
                                      columns=['task_time_invoked',
                                               'task_time_returned',
@@ -473,18 +504,18 @@ class DatabaseManager:
                                               'task_fail_cost',
                                               'task_hashsum'],
                                      messages=task_info_update_messages)
-                    logger.debug("Inserting {} task_info_all_messages into status table".format(len(task_info_all_messages)))
+                    self.logger.debug("Inserting {} task_info_all_messages into status table".format(len(task_info_all_messages)))
 
                     self._insert(table=STATUS, messages=task_info_all_messages)
 
                     if try_insert_messages:
-                        logger.debug("Inserting {} TASK_INFO to try table".format(len(try_insert_messages)))
+                        self.logger.debug("Inserting {} TASK_INFO to try table".format(len(try_insert_messages)))
                         self._insert(table=TRY, messages=try_insert_messages)
-                        logger.debug(
+                        self.logger.debug(
                             "There are {} inserted task records".format(len(inserted_tasks)))
 
                     if try_update_messages:
-                        logger.debug("Updating {} TASK_INFO into try table".format(len(try_update_messages)))
+                        self.logger.debug("Updating {} TASK_INFO into try table".format(len(try_update_messages)))
                         self._update(table=TRY,
                                      columns=['run_id', 'task_id', 'try_id',
                                               'task_fail_history',
@@ -499,7 +530,7 @@ class DatabaseManager:
                 """
                 node_info_messages = self._get_messages_in_batch(self.pending_node_queue)
                 if node_info_messages:
-                    logger.debug(
+                    self.logger.debug(
                         "Got {} messages from node queue".format(len(node_info_messages)))
                     self._insert(table=NODE, messages=node_info_messages)
 
@@ -509,7 +540,7 @@ class DatabaseManager:
                 """
                 block_info_messages = self._get_messages_in_batch(self.pending_block_queue)
                 if block_info_messages:
-                    logger.debug(
+                    self.logger.debug(
                         "Got {} messages from block queue".format(len(block_info_messages)))
                     # block_info_messages is possibly a nested list of dict (at different polling times)
                     # Each dict refers to the info of a job/block at one polling time
@@ -525,7 +556,7 @@ class DatabaseManager:
                 resource_messages = self._get_messages_in_batch(self.pending_resource_queue)
 
                 if resource_messages:
-                    logger.debug(
+                    self.logger.debug(
                         "Got {} messages from resource queue, "
                         "{} reprocessable as first messages, "
                         "{} reprocessable as last messages".format(len(resource_messages),
@@ -544,7 +575,7 @@ class DatabaseManager:
                                 reprocessable_first_resource_messages.append(msg)
                             else:
                                 if task_try_id in deferred_resource_messages:
-                                    logger.error("Task {} already has a deferred resource message. Discarding previous message.".format(msg['task_id']))
+                                    self.logger.error("Task {} already has a deferred resource message. Discarding previous message.".format(msg['task_id']))
                                 deferred_resource_messages[task_try_id] = msg
                         elif msg['last_msg']:
                             # This assumes that the primary key has been added
@@ -576,22 +607,22 @@ class DatabaseManager:
                 """
                 energy_info_messages = self._get_messages_in_batch(self.pending_energy_queue)
                 if energy_info_messages:
-                    logger.debug(
+                    self.logger.debug(
                         "Got {} messages from energy queue".format(len(energy_info_messages)))
                     self._insert(table=ENERGY, messages=energy_info_messages)
 
             except Exception:
-                logger.exception("Exception in db loop: this might have been a malformed message, or some other error. monitoring data may have been lost")
+                self.logger.exception("Exception in db loop: this might have been a malformed message, or some other error. monitoring data may have been lost")
                 exception_happened = True
         if exception_happened:
             raise RuntimeError("An exception happened sometime during database processing and should have been logged in database_manager.log")
 
     @wrap_with_logs(target="database_manager")
     def _migrate_logs_to_internal(self, logs_queue: queue.Queue, queue_tag: str, kill_event: threading.Event) -> None:
-        logger.info("Starting processing for queue {}".format(queue_tag))
+        self.logger.info("Starting processing for queue {}".format(queue_tag))
 
         while not kill_event.is_set() or logs_queue.qsize() != 0:
-            logger.debug("""Checking STOP conditions for {} threads: {}, {}"""
+            self.logger.debug("""Checking STOP conditions for {} threads: {}, {}"""
                          .format(queue_tag, kill_event.is_set(), logs_queue.qsize() != 0))
             try:
                 x, addr = logs_queue.get(timeout=0.1)
@@ -621,7 +652,7 @@ class DatabaseManager:
                 elif queue_tag == "block":
                     self._dispatch_to_internal(x)
                 else:
-                    logger.error(f"Discarding because unknown queue tag '{queue_tag}', message: {x}")
+                    self.logger.error(f"Discarding because unknown queue tag '{queue_tag}', message: {x}")
 
     def _dispatch_to_internal(self, x: Tuple) -> None:
         if x[0] in [MessageType.WORKFLOW_INFO, MessageType.TASK_INFO]:
@@ -632,16 +663,16 @@ class DatabaseManager:
         elif x[0] == MessageType.NODE_INFO:
             assert len(x) == 2, "expected NODE_INFO tuple to have exactly two elements"
 
-            logger.info("Will put {} to pending node queue".format(x[1]))
+            self.logger.info("Will put {} to pending node queue".format(x[1]))
             self.pending_node_queue.put(x[1])
         elif x[0] == MessageType.ENERGY_INFO:
-            logger.info("Will put {} to pending energy queue".format(x[1]))
+            self.logger.info("Will put {} to pending energy queue".format(x[1]))
             self.pending_energy_queue.put(x[1])
         elif x[0] == MessageType.BLOCK_INFO:
-            logger.info("Will put {} to pending block queue".format(x[1]))
+            self.logger.info("Will put {} to pending block queue".format(x[1]))
             self.pending_block_queue.put(x[-1])
         else:
-            logger.error("Discarding message of unknown type {}".format(x[0]))
+            self.logger.error("Discarding message of unknown type {}".format(x[0]))
 
     def _update(self, table: str, columns: List[str], messages: List[MonitoringMessage]) -> None:
         try:
@@ -655,23 +686,23 @@ class DatabaseManager:
                     # if retried - for example, the database being locked because someone else is readying
                     # the tables we are trying to write to. If that assumption is wrong, then this loop
                     # may go on forever.
-                    logger.warning("Got a database OperationalError. Ignoring and retrying on the assumption that it is recoverable: {}".format(e))
+                    self.logger.warning("Got a database OperationalError. Ignoring and retrying on the assumption that it is recoverable: {}".format(e))
                     self.db.rollback()
                     time.sleep(1)  # hard coded 1s wait - this should be configurable or exponential backoff or something
 
         except KeyboardInterrupt:
-            logger.exception("KeyboardInterrupt when trying to update Table {}".format(table))
+            self.logger.exception("KeyboardInterrupt when trying to update Table {}".format(table))
             try:
                 self.db.rollback()
             except Exception:
-                logger.exception("Rollback failed")
+                self.logger.exception("Rollback failed")
             raise
         except Exception:
-            logger.exception("Got exception when trying to update table {}".format(table))
+            self.logger.exception("Got exception when trying to update table {}".format(table))
             try:
                 self.db.rollback()
             except Exception:
-                logger.exception("Rollback failed")
+                self.logger.exception("Rollback failed")
 
     def _insert(self, table: str, messages: List[MonitoringMessage]) -> None:
         try:
@@ -682,22 +713,22 @@ class DatabaseManager:
                     done = True
                 except sa.exc.OperationalError as e:
                     # hoping that this is a database locked error during _update, not some other problem
-                    logger.warning("Got a database OperationalError. Ignoring and retrying on the assumption that it is recoverable: {}".format(e))
+                    self.logger.warning("Got a database OperationalError. Ignoring and retrying on the assumption that it is recoverable: {}".format(e))
                     self.db.rollback()
                     time.sleep(1)  # hard coded 1s wait - this should be configurable or exponential backoff or something
         except KeyboardInterrupt:
-            logger.exception("KeyboardInterrupt when trying to update Table {}".format(table))
+            self.logger.exception("KeyboardInterrupt when trying to update Table {}".format(table))
             try:
                 self.db.rollback()
             except Exception:
-                logger.exception("Rollback failed")
+                self.logger.exception("Rollback failed")
             raise
         except Exception:
-            logger.exception("Got exception when trying to insert to table {}".format(table))
+            self.logger.exception("Got exception when trying to insert to table {}".format(table))
             try:
                 self.db.rollback()
             except Exception:
-                logger.exception("Rollback failed")
+                self.logger.exception("Rollback failed")
 
     def _get_messages_in_batch(self, msg_queue: "queue.Queue[X]") -> List[X]:
         messages = []  # type: List[X]
@@ -707,18 +738,18 @@ class DatabaseManager:
                 break
             try:
                 x = msg_queue.get(timeout=0.1)
-                # logger.debug("Database manager receives a message {}".format(x))
+                # self.logger.debug("Database manager receives a message {}".format(x))
             except queue.Empty:
-                logger.debug("Database manager has not received any message.")
+                self.logger.debug("Database manager has not received any message.")
                 break
             else:
                 messages.append(x)
         return messages
 
     def close(self) -> None:
-        logger.info("Database Manager cleanup initiated.")
+        self.logger.info("Database Manager cleanup initiated.")
         if not self.workflow_end and self.workflow_start_message:
-            logger.info("Logging workflow end info to database due to abnormal exit")
+            self.logger.info("Logging workflow end info to database due to abnormal exit")
             time_completed = datetime.datetime.now()
             msg = {'time_completed': time_completed,
                    'workflow_duration': (time_completed - self.workflow_start_message['time_began']).total_seconds()}
