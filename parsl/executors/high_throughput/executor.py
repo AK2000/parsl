@@ -286,7 +286,11 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin):
         self.cpu_affinity = cpu_affinity
 
         if not launch_cmd:
-            self.launch_cmd = ("process_worker_pool.py {debug} {max_workers} "
+            self.launch_cmd = ("PARSL_MONITORING_HUB_URL={url} "
+                               "PARSL_MONITORING_RADIO_MODE={radio_mode} "
+                               "PARSL_RUN_ID={run_id} "
+                               "PARSL_RUN_DIR={rundir} "
+                               "process_worker_pool.py {debug} {max_workers} "
                                "-a {addresses} "
                                "-p {prefetch_capacity} "
                                "-c {cores_per_worker} "
@@ -353,7 +357,11 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin):
                                        logdir=worker_logdir,
                                        cpu_affinity=self.cpu_affinity,
                                        accelerators=" ".join(self.available_accelerators),
-                                       start_method=self.start_method)
+                                       start_method=self.start_method,
+                                       url=self.monitoring_hub_url,
+                                       run_id=self.run_id,
+                                       radio_mode=self.radio_mode,
+                                       rundir=self.run_dir)
         if self.monitor_energy:
             m_cmd = self.monitor_cmd.format(debug=debug_opts,
                                             energy_monitor=self.energy_monitor,
