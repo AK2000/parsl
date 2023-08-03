@@ -5,7 +5,7 @@ import datetime
 from functools import wraps
 
 from parsl.multiprocessing import ForkProcess
-from multiprocessing import Event
+from multiprocessing import Event, Barrier
 from parsl.process_loggers import wrap_with_logs
 
 from parsl.monitoring.message_type import MessageType
@@ -58,6 +58,8 @@ def monitor_wrapper(f: Any,           # per app
                                run_dir)
 
             if monitor_resources:
+                start_barrier = Barrier(2)
+
                 # create the monitor process and start
                 pp = ForkProcess(target=monitor,
                                  args=(os.getpid(),
@@ -69,11 +71,16 @@ def monitor_wrapper(f: Any,           # per app
                                        logging_level,
                                        sleep_dur,
                                        run_dir,
-                                       terminate_event),
+                                       terminate_event,
+                                       start_barrier),
                                  daemon=True,
                                  name="Monitor-Wrapper-{}".format(task_id))
                 pp.start()
                 p = pp
+
+                # wait for the monitor process to be ready
+                start_barrier.wait()
+
                 #  TODO: awkwardness because ForkProcess is not directly a constructor
                 # and type-checking is expecting p to be optional and cannot
                 # narrow down the type of p in this block.
@@ -176,7 +183,8 @@ def monitor(pid: int,
             run_dir: str,
             # removed all defaults because unused and there's no meaningful default for terminate_event.
             # these probably should become named arguments, with a *, and named at invocation.
-            terminate_event: Any) -> None:  # cannot be Event because of multiprocessing type weirdness.
+            terminate_event: Any,
+            start_barrier: Any) -> None:  # cannot be Event/Barrier because of multiprocessing type weirdness.
     """Monitors the Parsl task's resources by pointing psutil to the task's pid and watching it and its children.
 
     This process makes calls to logging, but deliberately does not attach
@@ -188,6 +196,7 @@ def monitor(pid: int,
     import logging
     import platform
     import psutil
+    import performance_features
 
     from parsl.utils import setproctitle
 
@@ -215,11 +224,27 @@ def monitor(pid: int,
 
     pm = psutil.Process(pid)
 
+    # TODO: Verify monitoring events exist, ensure there are enough counters
+    # TODO: Switch to PAPI. More complicated interface, but larger,
+    # more stable development team
+    # TODO: Ensure that we are tracing children
+    events= [
+                ['UNHALTED_CORE_CYCLES', 
+                'UNHALTED_REFERENCE_CYCLES', 
+                'LLC_MISSES', 
+                'INSTRUCTION_RETIRED'],
+            ]
+    profiler = performance_features.Profiler(pid=pid, events_groups=events)
+
     children_user_time = {}  # type: Dict[int, float]
     children_system_time = {}  # type: Dict[int, float]
 
     def accumulate_and_prepare() -> Dict[str, Any]:
         d = {"psutil_process_" + str(k): v for k, v in pm.as_dict().items() if k in simple}
+        event_counters = profiler.read_events()
+        profiler.reset_events()
+        event_counters = profiler.__format_data(event_counters)
+
         d["run_id"] = run_id
         d["task_id"] = task_id
         d["try_id"] = try_id
@@ -272,12 +297,24 @@ def monitor(pid: int,
             total_children_system_time += children_system_time[child_pid]
         d['psutil_process_time_user'] += total_children_user_time
         d['psutil_process_time_system'] += total_children_system_time
+
+        # Send event counters
+        d['perf_unhalted_core_cycles'] = event_counters[0]
+        d['perf_unhalted_reference_cycles'] = event_counters[1]
+        d['perf_llc_misses'] = event_counters[2]
+        d['perf_instructions_retired'] = event_counters[3]
+        
         logging.debug("sending message")
         return d
 
     next_send = time.time()
     accumulate_dur = 5.0  # TODO: make configurable?
 
+    profiler.__initialize()
+    profiler.reset_events()
+    profiler.enable_events()
+    profiler.program.start()
+    start_barrier.wait() # Continue function
     while not terminate_event.is_set():
         logging.debug("start of monitoring loop")
         try:

@@ -3,6 +3,7 @@ import logging
 import json
 import queue
 import time
+import datetime
 import threading
 import uuid
 import os
@@ -166,12 +167,16 @@ def run(energy_monitor: NodeEnergyMonitor,
     logger.debug("start of energy monitor")
 
     def measure_and_prepare():
-        d = energy_monitor.report().dict()
-        d["devices"] = json.dumps(d["devices"])
+        report = energy_monitor.report()
+        d = dict()
+        d["total_energy"] = report.total_energy
+        d["devices"] = json.dumps(report.devices)
         d["run_id"] = run_id
         d["block_id"] = block_id
-        d['resource_monitoring_interval'] = sleep_dur
-        d['hostname'] = platform.node()
+        d["resource_monitoring_interval"] = sleep_dur
+        d["hostname"] = platform.node()
+        d["timestamp"] = datetime.datetime.now()
+        d["duration"] = report.end_time - report.start_time
         return d
 
     next_send = time.time()

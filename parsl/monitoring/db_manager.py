@@ -41,7 +41,6 @@ NODE = 'node'            # Node table include node info
 BLOCK = 'block'          # Block table include the status for block polling
 ENERGY = 'energy'
 
-
 class Database:
 
     if not _sqlalchemy_enabled:
@@ -130,7 +129,7 @@ class Database:
 
     class Status(Base):
         __tablename__ = STATUS
-        task_id = Column(Integer, nullable=False)
+        task_id = Column(Text, nullable=False)
         task_status_name = Column(Text, nullable=False)
         timestamp = Column(DateTime, nullable=False)
         run_id = Column(Text, sa.ForeignKey('workflow.run_id'), nullable=False)
@@ -142,10 +141,10 @@ class Database:
 
     class Task(Base):
         __tablename__ = TASK
-        task_id = Column('task_id', Integer, nullable=False)
+        task_id = Column('task_id', Text, nullable=False)
         run_id = Column('run_id', Text, nullable=False)
         task_depends = Column('task_depends', Text, nullable=True)
-        task_func_name = Column('task_func_name', Text, nullable=False)
+        task_func_name = Column('task_func_name', Text, nullable=True)
         task_memoize = Column('task_memoize', Text, nullable=False)
         task_hashsum = Column('task_hashsum', Text, nullable=True, index=True)
         task_inputs = Column('task_inputs', Text, nullable=True)
@@ -170,7 +169,7 @@ class Database:
     class Try(Base):
         __tablename__ = TRY
         try_id = Column('try_id', Integer, nullable=False)
-        task_id = Column('task_id', Integer, nullable=False)
+        task_id = Column('task_id', Text, nullable=False)
         run_id = Column('run_id', Text, nullable=False)
 
         block_id = Column('block_id', Text, nullable=True)
@@ -225,7 +224,7 @@ class Database:
     class Resource(Base):
         __tablename__ = RESOURCE
         try_id = Column('try_id', Integer, nullable=False)
-        task_id = Column('task_id', Integer, nullable=False)
+        task_id = Column('task_id', Text, nullable=False)
         run_id = Column('run_id', Text, sa.ForeignKey(
             'workflow.run_id'), nullable=False)
         timestamp = Column('timestamp', DateTime, nullable=False)
@@ -251,6 +250,16 @@ class Database:
             'psutil_process_disk_write', Float, nullable=True)
         psutil_process_status = Column(
             'psutil_process_status', Text, nullable=True)
+
+        perf_unhalted_core_cycles = Column(
+            'perf_unhalted_core_cycles', Integer, nullable=True)
+        perf_unhalted_reference_cycles = Column(
+            'perf_unhalted_reference_cycles', Integer, nullable=True)
+        perf_llc_misses = Column(
+            'perf_llc_misses', Integer, nullable=True)
+        perf_instructions_retired = Column(
+            'perf_instructions_retired', Integer, nullable=True)
+
         __table_args__ = (
             PrimaryKeyConstraint('try_id', 'task_id', 'run_id', 'timestamp'),
         )
@@ -260,14 +269,14 @@ class Database:
         run_id = Column('run_id', Text, nullable=False)
         block_id = Column('block_id', Text, nullable=False)
         hostname = Column('hostname', Text, nullable=False)
-        start_time = Column('start_time', BigInteger, nullable=False)
-        end_time = Column('end_time', BigInteger, nullable=False)
+        timestamp = Column('timestamp', DateTime, nullable=False)
+        duration = Column('duration', Integer, nullable=False)
         total_energy = Column('total_energy', Float, nullable=False)
         resource_monitoring_interval = Column(
             'resource_monitoring_interval', Float, nullable=True)
         devices = Column('devices', Text, nullable=True)
         __table_args__ = (
-            PrimaryKeyConstraint('run_id', 'block_id', 'hostname', 'end_time'),
+            PrimaryKeyConstraint('run_id', 'block_id', 'timestamp'),
         )
 
 class DatabaseManager:
