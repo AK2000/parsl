@@ -66,9 +66,8 @@ def monitor_wrapper(f: Any,           # per app
                                   args=(f, 
                                         child_pipe, 
                                         start_barrier, 
-                                        *args),
-                                  kwargs=kwargs)
-                p.start()
+                                        *args, 
+                                        **kwargs))
 
                 # create the monitor process and start
 
@@ -89,9 +88,10 @@ def monitor_wrapper(f: Any,           # per app
                                        start_barrier),
                                  daemon=True,
                                  name="Monitor-Wrapper-{}".format(task_id))
-                thread.start()
-
                 try:
+                    p.start()
+                    thread.start()
+
                     result = parent_pipe.recv()
                     if isinstance(result, BaseException):
                         raise result
@@ -180,7 +180,8 @@ def send_first_last_message(try_id: int,
     return
 
 def call_user_function(f: Callable, conn: Any, barrier: Any, *args: List[Any], **kwargs: Dict[str, Any]):
-    barrier.wait()
+    start_barrier.wait()
+
     try:
         result = f(*args, **kwargs)
     except Exception as exc:
@@ -247,10 +248,10 @@ def monitor(pid: int,
     # more stable development team
     # TODO: Ensure that we are tracing children
     events= [
-                ['UNHALTED_CORE_CYCLES'], 
-                ['UNHALTED_REFERENCE_CYCLES'], 
-                ['LLC_MISSES'], 
-                ['INSTRUCTION_RETIRED'],
+                ['UNHALTED_CORE_CYCLES', 
+                'UNHALTED_REFERENCE_CYCLES', 
+                'LLC_MISSES', 
+                'INSTRUCTION_RETIRED'],
             ]
     profiler = performance_features.Profiler(pid=pid, events_groups=events)
 
@@ -261,7 +262,7 @@ def monitor(pid: int,
         d = {"psutil_process_" + str(k): v for k, v in pm.as_dict().items() if k in simple}
         event_counters = profiler.read_events()
         profiler.reset_events()
-        event_counters = profiler._Profiler__format_data([event_counters,])
+        event_counters = profiler._Profiler__format_data(event_counters)
 
         d["run_id"] = run_id
         d["task_id"] = task_id
@@ -317,10 +318,10 @@ def monitor(pid: int,
         d['psutil_process_time_system'] += total_children_system_time
 
         # Send event counters
-        d['perf_unhalted_core_cycles'] = event_counters[0][0]
-        d['perf_unhalted_reference_cycles'] = event_counters[0][1]
-        d['perf_llc_misses'] = event_counters[0][2]
-        d['perf_instructions_retired'] = event_counters[0][3]
+        d['perf_unhalted_core_cycles'] = event_counters[0]
+        d['perf_unhalted_reference_cycles'] = event_counters[1]
+        d['perf_llc_misses'] = event_counters[2]
+        d['perf_instructions_retired'] = event_counters[3]
         
         logging.debug("sending message")
         return d
