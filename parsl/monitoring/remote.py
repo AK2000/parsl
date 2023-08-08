@@ -3,10 +3,9 @@ import time
 import logging
 import datetime
 from functools import wraps
-from multiprocessing import Barrier, Pipe
-from threading import Thread, Event
 
 from parsl.multiprocessing import ForkProcess
+from multiprocessing import Event, Barrier
 from parsl.process_loggers import wrap_with_logs
 
 from parsl.monitoring.message_type import MessageType
@@ -59,23 +58,11 @@ def monitor_wrapper(f: Any,           # per app
                                run_dir)
 
             if monitor_resources:
-                parent_pipe, child_pipe = Pipe()
                 start_barrier = Barrier(2)
 
-                p = ForkProcess(target=call_user_function,
-                                  args=(f, 
-                                        child_pipe, 
-                                        start_barrier, 
-                                        *args, 
-                                        **kwargs))
-
                 # create the monitor process and start
-
-                #  TODO: awkwardness because ForkProcess is not directly a constructor
-                # and type-checking is expecting p to be optional and cannot
-                # narrow down the type of p in this block.
-                thread = Thread(target=monitor,
-                                 args=(p.pid,
+                pp = ForkProcess(target=monitor,
+                                 args=(os.getpid(),
                                        try_id,
                                        task_id,
                                        monitoring_hub_url,
@@ -88,35 +75,39 @@ def monitor_wrapper(f: Any,           # per app
                                        start_barrier),
                                  daemon=True,
                                  name="Monitor-Wrapper-{}".format(task_id))
-                try:
-                    p.start()
-                    thread.start()
+                pp.start()
+                p = pp
 
-                    result = parent_pipe.recv()
-                    if isinstance(result, BaseException):
-                        raise result
-                    
-                    return result
-                    
-                finally:
-                    p.join()
-                    terminate_event.set()
-                    thread.join() # What happens if this takes too long?
-                    send_last_message(try_id,
-                                    task_id,
-                                    monitoring_hub_url,
-                                    run_id,
-                                    radio_mode, run_dir)
+                # wait for the monitor process to be ready
+                start_barrier.wait()
+
+                #  TODO: awkwardness because ForkProcess is not directly a constructor
+                # and type-checking is expecting p to be optional and cannot
+                # narrow down the type of p in this block.
+
             else:
+                p = None
 
-                try:
-                    return f(*args, **kwargs)
-                finally:
-                    send_last_message(try_id,
-                                    task_id,
-                                    monitoring_hub_url,
-                                    run_id,
-                                    radio_mode, run_dir)
+            try:
+                return f(*args, **kwargs)
+            finally:
+                # There's a chance of zombification if the workers are killed by some signals (?)
+                if p:
+                    terminate_event.set()
+                    p.join(30)  # 30 second delay for this -- this timeout will be hit in the case of an unusually long end-of-loop
+                    if p.exitcode is None:
+                        logger.warn("Event-based termination of monitoring helper took too long. Using process-based termination.")
+                        p.terminate()
+                        # DANGER: this can corrupt shared queues according to docs.
+                        # So, better that the above termination event worked.
+                        # This is why this log message is a warning
+                        p.join()
+
+                send_last_message(try_id,
+                                  task_id,
+                                  monitoring_hub_url,
+                                  run_id,
+                                  radio_mode, run_dir)
 
         monitoring_wrapper_cache[cache_key] = wrapped
 
@@ -179,16 +170,6 @@ def send_first_last_message(try_id: int,
     radio.send(msg)
     return
 
-def call_user_function(f: Callable, conn: Any, barrier: Any, *args: List[Any], **kwargs: Dict[str, Any]):
-    start_barrier.wait()
-
-    try:
-        result = f(*args, **kwargs)
-    except Exception as exc:
-        result = exc
-
-    conn.send(result)
-    conn.close()
 
 @wrap_with_logs
 def monitor(pid: int,
@@ -262,7 +243,7 @@ def monitor(pid: int,
         d = {"psutil_process_" + str(k): v for k, v in pm.as_dict().items() if k in simple}
         event_counters = profiler.read_events()
         profiler.reset_events()
-        event_counters = profiler._Profiler__format_data(event_counters)
+        event_counters = profiler.__format_data(event_counters)
 
         d["run_id"] = run_id
         d["task_id"] = task_id
@@ -329,7 +310,7 @@ def monitor(pid: int,
     next_send = time.time()
     accumulate_dur = 5.0  # TODO: make configurable?
 
-    profiler._Profiler__initialize()
+    profiler.__initialize()
     profiler.reset_events()
     profiler.enable_events()
     profiler.program.start()
