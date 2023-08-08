@@ -229,10 +229,10 @@ def monitor(pid: int,
     # more stable development team
     # TODO: Ensure that we are tracing children
     events= [
-                ['UNHALTED_CORE_CYCLES', 
-                'UNHALTED_REFERENCE_CYCLES', 
-                'LLC_MISSES', 
-                'INSTRUCTION_RETIRED'],
+                ['UNHALTED_CORE_CYCLES'], 
+                ['UNHALTED_REFERENCE_CYCLES'], 
+                ['LLC_MISSES'], 
+                ['INSTRUCTION_RETIRED'],
             ]
     profiler = performance_features.Profiler(pid=pid, events_groups=events)
 
@@ -243,7 +243,7 @@ def monitor(pid: int,
         d = {"psutil_process_" + str(k): v for k, v in pm.as_dict().items() if k in simple}
         event_counters = profiler.read_events()
         profiler.reset_events()
-        event_counters = profiler.__format_data(event_counters)
+        event_counters = profiler._Profiler__format_data([event_counters,])
 
         d["run_id"] = run_id
         d["task_id"] = task_id
@@ -299,10 +299,10 @@ def monitor(pid: int,
         d['psutil_process_time_system'] += total_children_system_time
 
         # Send event counters
-        d['perf_unhalted_core_cycles'] = event_counters[0]
-        d['perf_unhalted_reference_cycles'] = event_counters[1]
-        d['perf_llc_misses'] = event_counters[2]
-        d['perf_instructions_retired'] = event_counters[3]
+        d['perf_unhalted_core_cycles'] = event_counters[0][0]
+        d['perf_unhalted_reference_cycles'] = event_counters[0][1]
+        d['perf_llc_misses'] = event_counters[0][2]
+        d['perf_instructions_retired'] = event_counters[0][3]
         
         logging.debug("sending message")
         return d
@@ -310,7 +310,7 @@ def monitor(pid: int,
     next_send = time.time()
     accumulate_dur = 5.0  # TODO: make configurable?
 
-    profiler.__initialize()
+    profiler._Profiler__initialize()
     profiler.reset_events()
     profiler.enable_events()
     profiler.program.start()
