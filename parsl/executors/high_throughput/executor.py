@@ -306,7 +306,12 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin):
                                "--cpu-affinity {cpu_affinity} "
                                "--available-accelerators {accelerators} "
                                "--uid {{uid}} "
-                               "--start-method {start_method}")
+                               "--start-method {start_method} "
+                               "{monitor_resources} "
+                               "--monitoring_url {url} "
+                               "--run_id {run_id} "
+                               "--radio_mode {radio_mode} "
+                               "--sleep_dur {sleep_dur}")
         
         self.energy_monitor = energy_monitor
         self.monitor_energy = (energy_monitor is not None)
@@ -333,6 +338,7 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin):
         """
         debug_opts = "--debug" if self.worker_debug else ""
         max_workers = "" if self.max_workers == float('inf') else "--max_workers={}".format(self.max_workers)
+        monitor_resources = "--monitor_resources" if self.resource_monitoring_enabled else ""
 
         address_probe_timeout_string = ""
         if self.address_probe_timeout:
@@ -358,10 +364,12 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin):
                                        cpu_affinity=self.cpu_affinity,
                                        accelerators=" ".join(self.available_accelerators),
                                        start_method=self.start_method,
+                                       monitor_resources=monitor_resources,
                                        url=self.monitoring_hub_url,
                                        run_id=self.run_id,
                                        radio_mode=self.radio_mode,
-                                       rundir=self.run_dir)
+                                       rundir=self.run_dir,
+                                       sleep_dur=self.resource_monitoring_interval)
         if self.monitor_energy:
             m_cmd = self.monitor_cmd.format(debug=debug_opts,
                                             energy_monitor=self.energy_monitor,

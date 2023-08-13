@@ -682,6 +682,13 @@ if __name__ == "__main__":
                         help="Names of available accelerators")
     parser.add_argument("--start-method", type=str, choices=["fork", "spawn", "thread"], default="fork",
                         help="Method used to start new worker processes")
+    parser.add_argument("--monitor_resources", action='store_true',
+                        help="Report the resource utilization of the processes")
+    parser.add_argument("--monitoring_url", type=str, help="Monitoring hub url")
+    parser.add_argument("--run_id", type=str, help="Run id")
+    parser.add_argument("--radio_mode", type=str, choices=["udp", "htex", "filesystem"],
+                        help="Which radio to use to communicate with monitoring hub")
+    parser.add_argument("--sleep_dur", type=int, help="Sleep time in between monitoring")
 
     args = parser.parse_args()
 
@@ -712,6 +719,20 @@ if __name__ == "__main__":
         logger.info("Accelerators: {}".format(" ".join(args.available_accelerators)))
         logger.info("Start method: {}".format(args.start_method))
 
+        if args.monitor_resources:
+            from parsl.monitoring.resource_monitor import resource_monitor_loop
+            terminate_event = multiprocessing.Event()
+            monitor_process = mpForkProcess(target=resource_monitor_loop,
+                                            args=(args.monitoring_url,
+                                                    args.uid,
+                                                    args.run_id,
+                                                    args.radio_mode,
+                                                    logging.DEBUG if args.debug is True else logging.INFO
+                                                    args.sleep_dur,
+                                                    args.logdir,
+                                                    terminate_event),
+                                            daemon=True)
+
         manager = Manager(task_port=args.task_port,
                           result_port=args.result_port,
                           addresses=args.addresses,
@@ -735,3 +756,8 @@ if __name__ == "__main__":
     else:
         logger.info("Process worker pool exiting normally")
         print("Process worker pool exiting normally")
+    finally:
+        if args.monitor_resources:
+            terminate_event.set()
+            monitor_process.join()
+        

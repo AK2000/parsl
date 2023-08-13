@@ -174,6 +174,7 @@ class Database:
 
         block_id = Column('block_id', Text, nullable=True)
         hostname = Column('hostname', Text, nullable=True)
+        pid = Column('pid', Integer, nullable=True)
 
         task_executor = Column('task_executor', Text, nullable=False)
 
@@ -223,13 +224,11 @@ class Database:
 
     class Resource(Base):
         __tablename__ = RESOURCE
-        try_id = Column('try_id', Integer, nullable=False)
-        task_id = Column('task_id', Text, nullable=False)
+        pid = Column('pid', Integer, nullable=False)
         run_id = Column('run_id', Text, sa.ForeignKey(
             'workflow.run_id'), nullable=False)
         timestamp = Column('timestamp', DateTime, nullable=False)
-        resource_monitoring_interval = Column(
-            'resource_monitoring_interval', Float, nullable=True)
+        name = Column('name', Text, nullable=True)
         psutil_process_pid = Column(
             'psutil_process_pid', Integer, nullable=True)
         psutil_process_memory_percent = Column(
@@ -261,7 +260,7 @@ class Database:
             'perf_instructions_retired', Integer, nullable=True)
 
         __table_args__ = (
-            PrimaryKeyConstraint('try_id', 'task_id', 'run_id', 'timestamp'),
+            PrimaryKeyConstraint('pid', 'run_id', 'timestamp'),
         )
 
     class Energy(Base):
@@ -543,8 +542,9 @@ class DatabaseManager:
 
                     insert_resource_messages = []
                     for msg in resource_messages:
-                        task_try_id = str(msg['task_id']) + "." + str(msg['try_id'])
                         if msg['first_msg']:
+                            task_try_id = str(msg['task_id']) + "." + str(msg['try_id'])
+                            
                             # Update the running time to try table if first message
                             msg['task_status_name'] = States.running.name
                             msg['task_try_time_running'] = msg['timestamp']

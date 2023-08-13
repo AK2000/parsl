@@ -1109,6 +1109,7 @@ class DataFlowKernel:
             
             if self.monitoring is not None:
                 executor.monitoring_hub_url = self.monitoring.monitoring_hub_url
+                executor.resource_monitoring_enabled = self.monitoring.resource_monitoring_enabled
                 executor.resource_monitoring_interval = self.monitoring.resource_monitoring_interval
 
             if hasattr(executor, 'provider'):
