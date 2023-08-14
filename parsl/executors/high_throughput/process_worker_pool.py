@@ -217,6 +217,10 @@ class Manager:
             self.worker_count = min(len(self.available_accelerators), self.worker_count)
         logger.info("Manager will spawn {} workers".format(self.worker_count))
 
+        # share the result queue with monitoring code so it too can send results down that channel
+        import parsl.executors.high_throughput.monitoring_info as mi
+        mi.result_queue = self.pending_result_queue
+
     def create_reg_message(self):
         """ Creates a registration message to identify the worker to the interchange
         """
@@ -689,7 +693,7 @@ if __name__ == "__main__":
     parser.add_argument("--radio_mode", type=str, choices=["udp", "htex", "filesystem"],
                         help="Which radio to use to communicate with monitoring hub")
     parser.add_argument("--sleep_dur", type=int, help="Sleep time in between monitoring")
-
+    parser.add_argument("--energy_monitor", type=str, help="Which energy monitor to use")
     args = parser.parse_args()
 
     os.makedirs(os.path.join(args.logdir, "block-{}".format(args.block_id), args.uid), exist_ok=True)
@@ -719,20 +723,6 @@ if __name__ == "__main__":
         logger.info("Accelerators: {}".format(" ".join(args.available_accelerators)))
         logger.info("Start method: {}".format(args.start_method))
 
-        if args.monitor_resources:
-            from parsl.monitoring.resource_monitor import resource_monitor_loop
-            terminate_event = multiprocessing.Event()
-            monitor_process = mpForkProcess(target=resource_monitor_loop,
-                                            args=(args.monitoring_url,
-                                                    args.uid,
-                                                    args.run_id,
-                                                    args.radio_mode,
-                                                    logging.DEBUG if args.debug is True else logging.INFO
-                                                    args.sleep_dur,
-                                                    args.logdir,
-                                                    terminate_event),
-                                            daemon=True)
-
         manager = Manager(task_port=args.task_port,
                           result_port=args.result_port,
                           addresses=args.addresses,
@@ -748,6 +738,35 @@ if __name__ == "__main__":
                           poll_period=int(args.poll),
                           cpu_affinity=args.cpu_affinity,
                           available_accelerators=args.available_accelerators)
+        
+        if args.monitor_resources:
+            logger.info("Energy Monitor: {}".format(args.energy_monitor))
+            if args.energy_monitor:
+                logger.info("Setting up energy monitor")
+                import parsl.monitoring.energy.node_monitors as NodeEnergyMonitors
+                energy_monitor_cls = getattr(NodeEnergyMonitors, args.energy_monitor)
+                energy_monitor = energy_monitor_cls(debug=args.debug)
+            else:
+                energy_monitor = None
+
+            from parsl.monitoring.resource_monitor import resource_monitor_loop
+            terminate_event = multiprocessing.Event()
+
+            # This has to be done after the manager has been initialized so the htex radio works properly
+            monitor_process = mpForkProcess(target=resource_monitor_loop,
+                                            args=(args.monitoring_url,
+                                                    args.uid,
+                                                    args.run_id,
+                                                    args.radio_mode,
+                                                    logging.DEBUG if args.debug is True else logging.INFO,
+                                                    args.sleep_dur,
+                                                    args.logdir, # TODO: Need to pass run dir fo fs radio
+                                                    args.block_id,
+                                                    energy_monitor,
+                                                    terminate_event),
+                                            daemon=True)
+            monitor_process.start()
+
         manager.start()
 
     except Exception:

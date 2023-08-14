@@ -1,6 +1,7 @@
 import logging
 import os
 import parsl
+import pytest
 import time
 
 logger = logging.getLogger(__name__)
@@ -16,7 +17,7 @@ def this_app():
 
     return 5
 
-
+@pytest.mark.local
 def test_energy_collection():
     # this is imported here rather than at module level because
     # it isn't available in a plain parsl install, so this module

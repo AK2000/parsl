@@ -6,7 +6,7 @@ import logging
 import platform
 import psutil
 import getpass
-import performance_features
+import json
 from functools import wraps
 
 from parsl.multiprocessing import ForkProcess
@@ -15,8 +15,16 @@ from parsl.process_loggers import wrap_with_logs
 from parsl.utils import setproctitle
 
 from parsl.monitoring.message_type import MessageType
+from parsl.monitoring.energy.base import NodeEnergyMonitor
 from parsl.monitoring.radios import MonitoringRadio, UDPRadio, HTEXRadio, FilesystemRadio
 from typing import Any, Callable, Dict, List, Sequence, Tuple
+
+try:
+    import performance_features
+except ImportError:
+    _perf_counters_enabled = False
+else:
+    _perf_counters_enabled = True
 
 # these values are simple to log. Other information is available in special formats such as memory below.
 simple = ["cpu_num", 'create_time', 'cwd', 'exe', 'memory_percent', 'nice', 'name', 'num_threads', 'pid', 'ppid', 'status', 'username']
@@ -25,17 +33,13 @@ summable_values = ['memory_percent', 'num_threads']
 # perfomance counters read from performance features that can be used to monitor energy
 events= [['UNHALTED_CORE_CYCLES'], ['UNHALTED_REFERENCE_CYCLES'], ['LLC_MISSES'], ['INSTRUCTION_RETIRED']]
 
-logger = logging.getLogger(__name__)
 
-def accumulate_and_prepare(run_id: str,
+def measure_resource_utilization(run_id: str,
                            proc: psutil.Process, 
-                           profiler: performance_features.Profiler):
+                           profiler: Any = None):
 
     children_user_time = {}  # type: Dict[int, float]
     children_system_time = {}  # type: Dict[int, float]
-
-    event_counters = profiler.read_events()
-    event_counters = profiler._Profiler__format_data([event_counters,])
 
     d = {"psutil_process_" + str(k): v for k, v in proc.as_dict().items() if k in simple}
     d["run_id"] = run_id
@@ -89,15 +93,61 @@ def accumulate_and_prepare(run_id: str,
     d['psutil_process_time_user'] += total_children_user_time
     d['psutil_process_time_system'] += total_children_system_time
 
-    # Send event counters
-    d['perf_unhalted_core_cycles'] = event_counters[0][0]
-    d['perf_unhalted_reference_cycles'] = event_counters[0][1]
-    d['perf_llc_misses'] = event_counters[0][2]
-    d['perf_instructions_retired'] = event_counters[0][3]
+    if profiler:
+        event_counters = profiler.read_events()
+        event_counters = profiler._Profiler__format_data([event_counters,])
+
+        # Send event counters
+        d['perf_unhalted_core_cycles'] = event_counters[0][0]
+        d['perf_unhalted_reference_cycles'] = event_counters[0][1]
+        d['perf_llc_misses'] = event_counters[0][2]
+        d['perf_instructions_retired'] = event_counters[0][3]
     
     logging.debug("sending message")
     return d
+
+def measure_energy_use(energy_monitor: NodeEnergyMonitor,
+                       run_id: str,
+                       block_id: str,
+                       sleep_dur: float):
+    report = energy_monitor.report()
+    d = dict()
+    d["total_energy"] = report.total_energy
+    d["devices"] = json.dumps(report.devices)
+    d["run_id"] = run_id
+    d["block_id"] = block_id
+    d["resource_monitoring_interval"] = sleep_dur
+    d["hostname"] = platform.node()
+    d["timestamp"] = datetime.datetime.now()
+    d["duration"] = report.end_time - report.start_time
+    return d
     
+
+def start_file_logger(filename, rank, name=__name__, level=logging.DEBUG, format_string=None):
+    """Add a stream log handler.
+
+    Args:
+        - filename (string): Name of the file to write logs to
+        - name (string): Logger name
+        - level (logging.LEVEL): Set the logging level.
+        - format_string (string): Set the format string
+
+    Returns:
+       -  None
+    """
+    if format_string is None:
+        format_string = "%(asctime)s.%(msecs)03d %(name)s:%(lineno)d " \
+                        "%(process)d %(threadName)s " \
+                        "[%(levelname)s]  %(message)s"
+
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
+    handler = logging.FileHandler(filename)
+    handler.setLevel(level)
+    formatter = logging.Formatter(format_string, datefmt='%Y-%m-%d %H:%M:%S')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    return logger
 
 @wrap_with_logs
 def resource_monitor_loop(monitoring_hub_url: str,
@@ -107,32 +157,34 @@ def resource_monitor_loop(monitoring_hub_url: str,
             logging_level: int,
             sleep_dur: float,
             run_dir: str,
+            block_id: int,
+            energy_monitor: None | NodeEnergyMonitor,
             terminate_event: Any) -> None:  # cannot be Event/Barrier because of multiprocessing type weirdness.
     """Monitors the Parsl task's resources by pointing psutil to the task's pid and watching it and its children.
-
-    This process makes calls to logging, but deliberately does not attach
-    any log handlers. Previously, there was a handler which logged to a
-    file in /tmp, but this was usually not useful or even accessible.
-    In some circumstances, it might be useful to hack in a handler so the
-    logger calls remain in place.
     """
 
     setproctitle("parsl: resource monitor")
 
+    logger = start_file_logger('{}/block-{}/{}/resource_monitor.log'.format(run_dir, block_id, manager_id),
+                                   0,
+                                   level=logging_level)
+    logger.warning("Starting resource monitor!")
+
     radio: MonitoringRadio
     if radio_mode == "udp":
         radio = UDPRadio(monitoring_hub_url,
-                         source_id=task_id)
+                         source_id=manager_id)
     elif radio_mode == "htex":
         radio = HTEXRadio(monitoring_hub_url,
-                          source_id=task_id)
+                          source_id=manager_id)
     elif radio_mode == "filesystem":
         radio = FilesystemRadio(monitoring_url=monitoring_hub_url,
-                                source_id=task_id, run_dir=run_dir)
+                                source_id=manager_id, run_dir=run_dir)
     else:
         raise RuntimeError(f"Unknown radio mode: {radio_mode}")
 
-    logging.debug("start of monitor")
+    logger.info("start of monitor")
+    logger.info("Energy Monitor: {}".format(energy_monitor))
 
     user_name = getpass.getuser()
 
@@ -141,12 +193,12 @@ def resource_monitor_loop(monitoring_hub_url: str,
     next_send = time.time()
 
     while not terminate_event.is_set():
-        logging.debug("start of monitoring loop")
+        logger.info("start of monitoring loop")
         for proc in psutil.process_iter(['pid', 'username']):
-            if proc.info.username != user_name or proc.info.pid == os.getpid():
+            if proc.info["username"] != user_name or proc.info["pid"] == os.getpid():
                 continue
 
-            if proc.info.pid not in profilers:
+            if _perf_counters_enabled and proc.info.pid not in profilers:
                 profiler = performance_features.Profiler(pid=proc.info.pid, events_groups=events)
                 profiler._Profiler__initialize()
                 profiler.reset_events()
@@ -154,15 +206,23 @@ def resource_monitor_loop(monitoring_hub_url: str,
                 profiler.program.start()
                 profilers[proc.info.pid] = profiler
             
-            profiler = profilers[proc.info.pid]
+            profiler = profilers.get(proc.info["pid"])
 
             try:
-                d = accumulate_and_prepare(run_id, proc, profiler)
-                logging.debug("Sending intermediate resource message")
+                d = measure_resource_utilization(run_id, proc, profiler)
+                logger.info("Sending intermediate resource message")
                 radio.send((MessageType.RESOURCE_INFO, d))
-                next_send += sleep_dur
             except Exception:
-                logging.exception("Exception getting the resource usage. Not sending usage to Hub", exc_info=True)
+                logger.exception("Exception getting the resource usage. Not sending usage to Hub", exc_info=True)
+
+        if energy_monitor:
+            try:
+                d = measure_energy_use(energy_monitor, run_id, block_id, sleep_dur)
+                logger.info("Sending energy message")
+                radio.send((MessageType.ENERGY_INFO, d))
+            except Exception:
+                logger.exception("Exception getting the resource usage. Not sending usage to Hub", exc_info=True)
         
-        logging.debug("sleeping")
+        logger.debug("sleeping")
         terminate_event.wait(max(0, next_send - time.time()))
+        next_send += sleep_dur

@@ -311,24 +311,12 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin):
                                "--monitoring_url {url} "
                                "--run_id {run_id} "
                                "--radio_mode {radio_mode} "
-                               "--sleep_dur {sleep_dur}")
+                               "--sleep_dur {sleep_dur} "
+                               "{energy_monitor}")
         
+        self.resource_monitoring_enabled = False
         self.energy_monitor = energy_monitor
         self.monitor_energy = (energy_monitor is not None)
-        if self.monitor_energy:
-            self.monitor_cmd = ("process_energy_monitor.py {debug} "
-                                "-m {energy_monitor} "
-                                "-u {url} "
-                                "-i {run_id} "
-                                "-b {{block_id}} " 
-                                "-l {logdir} "
-                                "-s {sleep_dur} "
-                                "--rundir {rundir} "
-                                "-r {radio_mode} "
-                                "-a {addresses} "
-                                "--poll {poll_period} "
-                                "--manager_id {{uid}} "
-                                "--result_port {result_port}")
 
     def initialize_scaling(self):
         """ Compose the launch command and call the scale_out
@@ -339,6 +327,7 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin):
         debug_opts = "--debug" if self.worker_debug else ""
         max_workers = "" if self.max_workers == float('inf') else "--max_workers={}".format(self.max_workers)
         monitor_resources = "--monitor_resources" if self.resource_monitoring_enabled else ""
+        energy_monitor = f"--energy_monitor {self.energy_monitor}" if self.monitor_energy else ""
 
         address_probe_timeout_string = ""
         if self.address_probe_timeout:
@@ -365,24 +354,14 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin):
                                        accelerators=" ".join(self.available_accelerators),
                                        start_method=self.start_method,
                                        monitor_resources=monitor_resources,
-                                       url=self.monitoring_hub_url,
+                                       url="" if not monitor_resources else self.monitoring_hub_url,
                                        run_id=self.run_id,
                                        radio_mode=self.radio_mode,
                                        rundir=self.run_dir,
-                                       sleep_dur=self.resource_monitoring_interval)
-        if self.monitor_energy:
-            m_cmd = self.monitor_cmd.format(debug=debug_opts,
-                                            energy_monitor=self.energy_monitor,
-                                            url=self.monitoring_hub_url,
-                                            run_id=self.run_id,
-                                            logdir=worker_logdir,
-                                            sleep_dur=self.resource_monitoring_interval,
-                                            rundir=self.run_dir,
-                                            radio_mode=self.radio_mode,
-                                            addresses=self.all_addresses,
-                                            poll_period=self.poll_period,
-                                            result_port=self.worker_result_port)
-            l_cmd = f"{m_cmd} & {l_cmd}"
+                                       sleep_dur= 0 if not monitor_resources else self.resource_monitoring_interval,
+                                       energy_monitor=energy_monitor)
+
+
         self.launch_cmd = l_cmd
         logger.debug("Launch command: {}".format(self.launch_cmd))
 
