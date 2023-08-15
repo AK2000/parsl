@@ -573,7 +573,7 @@ class DatabaseManager:
                     self._update(table=TRY,
                                  columns=['task_try_time_running',
                                           'run_id', 'task_id', 'try_id',
-                                          'block_id', 'hostname'],
+                                          'block_id', 'hostname', 'pid'],
                                  messages=reprocessable_first_resource_messages)
 
                 if reprocessable_last_resource_messages:
