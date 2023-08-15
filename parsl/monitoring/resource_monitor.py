@@ -113,7 +113,7 @@ def measure_energy_use(energy_monitor: NodeEnergyMonitor,
     report = energy_monitor.report()
     d = dict()
     d["total_energy"] = report.total_energy
-    d["devices"] = json.dumps(report.devices)
+    d["devices"] = json.dumps(report.dict()["devices"])
     d["run_id"] = run_id
     d["block_id"] = block_id
     d["resource_monitoring_interval"] = sleep_dur

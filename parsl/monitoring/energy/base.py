@@ -25,7 +25,10 @@ class Result:
         return Result(start_time, self.end_time, total_energy, devices)
 
     def dict(self):
-        return asdict(self)
+        devices ={k: v.dict() for k,v in self.devices.items()}
+        result = asdict(self)
+        result["devices"] = devices
+        return result
 
 
 class NodeEnergyMonitor(RepresentationMixin, metaclass=ABCMeta):

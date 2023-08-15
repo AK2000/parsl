@@ -19,6 +19,9 @@ def test_rapl_monitor():
     assert new_result.start_time == result.end_time
     assert new_result.total_energy > 0
     
+    import json
+    assert json.dumps(new_result.dict()["devices"])
+    
     
 
 if __name__ == "__main__":
