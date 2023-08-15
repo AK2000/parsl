@@ -198,13 +198,18 @@ def resource_monitor_loop(monitoring_hub_url: str,
             if proc.info["username"] != user_name or proc.info["pid"] == os.getpid():
                 continue
 
-            if _perf_counters_enabled and proc.info.pid not in profilers:
-                profiler = performance_features.Profiler(pid=proc.info.pid, events_groups=events)
-                profiler._Profiler__initialize()
-                profiler.reset_events()
-                profiler.enable_events()
-                profiler.program.start()
-                profilers[proc.info.pid] = profiler
+            if _perf_counters_enabled and proc.info["pid"] not in profilers:
+                try:
+                    profiler = performance_features.Profiler(pid=proc.info["pid"], events_groups=events)
+                    profiler._Profiler__initialize()
+                    profiler.reset_events()
+                    profiler.enable_events()
+                    profiler.program.start()
+                    profilers[proc.info["pid"]] = profiler
+                except Exception:
+                    logger.exception("Exception starting performance counter profiler", exc_info=True)
+                else:
+                    logger.info("Started performance counter for process {}".format(proc.info["pid"]))
             
             profiler = profilers.get(proc.info["pid"])
 
