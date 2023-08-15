@@ -1,5 +1,7 @@
 import logging
 import time
+import re
+import os
 
 from parsl.monitoring.energy.base import NodeEnergyMonitor, Result
 from parsl.monitoring.energy.utils import j_to_uj
@@ -31,16 +33,16 @@ class RaplCPUNodeEnergyMonitor(NodeEnergyMonitor):
         end_time = time.clock_gettime(time.CLOCK_MONOTONIC)
 
 
-        devices = {f"package-{i}": Result(start_time, end_time, -1) for i in range(self._socket_ids[-1] + 1)}
+        devices = {f"package-{i}": Result(start_time, end_time, -1) for i in self._socket_ids}
         for i in range(len(self._pkg_files)):
             device_file = self._pkg_files[i]
             device_file.seek(0, 0)
-            devices[self._socket_ids[i]].total_energy = float(device_file.readline())
-            total_energy += devices[self._socket_ids[i]].total_energy
+            devices[f"package-{self._socket_ids[i]}"].total_energy = float(device_file.readline())
+            total_energy += devices[f"package-{self._socket_ids[i]}"].total_energy
 
             dram_file = self._dram_files[i]
             dram_file.seek(0, 0)
-            devices[self._socket_ids[i]].devices = {"dram": Result(start_time, end_time, float(device_file.readline()))}
+            devices[f"package-{self._socket_ids[i]}"].devices = {"dram": Result(start_time, end_time, float(dram_file.readline()))}
 
         reading = Result(start_time, end_time, total_energy, devices)
 
