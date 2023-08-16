@@ -49,16 +49,11 @@ def measure_resource_utilization(run_id: str,
     d['last_msg'] = False
     d['timestamp'] = datetime.datetime.now()
 
-    logging.debug("getting children")
-    children = proc.children(recursive=True)
-    logging.debug("got children")
-
     d["psutil_cpu_count"] = psutil.cpu_count()
     d['psutil_process_memory_virtual'] = proc.memory_info().vms
     d['psutil_process_memory_resident'] = proc.memory_info().rss
     d['psutil_process_time_user'] = proc.cpu_times().user
     d['psutil_process_time_system'] = proc.cpu_times().system
-    d['psutil_process_children_count'] = len(children)
     try:
         d['psutil_process_disk_write'] = proc.io_counters().write_chars
         d['psutil_process_disk_read'] = proc.io_counters().read_chars
@@ -67,31 +62,37 @@ def measure_resource_utilization(run_id: str,
         logging.exception("Exception reading IO counters for main process. Recorded IO usage may be incomplete", exc_info=True)
         d['psutil_process_disk_write'] = 0
         d['psutil_process_disk_read'] = 0
-    for child in children:
-        for k, v in child.as_dict(attrs=summable_values).items():
-            d['psutil_process_' + str(k)] += v
-        child_user_time = child.cpu_times().user
-        child_system_time = child.cpu_times().system
-        children_user_time[child.pid] = child_user_time
-        children_system_time[child.pid] = child_system_time
-        d['psutil_process_memory_virtual'] += child.memory_info().vms
-        d['psutil_process_memory_resident'] += child.memory_info().rss
-        try:
-            d['psutil_process_disk_write'] += child.io_counters().write_chars
-            d['psutil_process_disk_read'] += child.io_counters().read_chars
-        except Exception:
-            # occassionally pid temp files that hold this information are unvailable to be read so add zero
-            logging.exception("Exception reading IO counters for child {k}. Recorded IO usage may be incomplete".format(k=k), exc_info=True)
-            d['psutil_process_disk_write'] += 0
-            d['psutil_process_disk_read'] += 0
-    total_children_user_time = 0.0
-    for child_pid in children_user_time:
-        total_children_user_time += children_user_time[child_pid]
-    total_children_system_time = 0.0
-    for child_pid in children_system_time:
-        total_children_system_time += children_system_time[child_pid]
-    d['psutil_process_time_user'] += total_children_user_time
-    d['psutil_process_time_system'] += total_children_system_time
+
+    # logging.debug("getting children")
+    # children = proc.children(recursive=True)
+    # d['psutil_process_children_count'] = len(children)
+    # logging.debug("got children")
+    
+    # for child in children:
+    #     for k, v in child.as_dict(attrs=summable_values).items():
+    #         d['psutil_process_' + str(k)] += v
+    #     child_user_time = child.cpu_times().user
+    #     child_system_time = child.cpu_times().system
+    #     children_user_time[child.pid] = child_user_time
+    #     children_system_time[child.pid] = child_system_time
+    #     d['psutil_process_memory_virtual'] += child.memory_info().vms
+    #     d['psutil_process_memory_resident'] += child.memory_info().rss
+    #     try:
+    #         d['psutil_process_disk_write'] += child.io_counters().write_chars
+    #         d['psutil_process_disk_read'] += child.io_counters().read_chars
+    #     except Exception:
+    #         # occassionally pid temp files that hold this information are unvailable to be read so add zero
+    #         logging.exception("Exception reading IO counters for child {k}. Recorded IO usage may be incomplete".format(k=k), exc_info=True)
+    #         d['psutil_process_disk_write'] += 0
+    #         d['psutil_process_disk_read'] += 0
+    # total_children_user_time = 0.0
+    # for child_pid in children_user_time:
+    #     total_children_user_time += children_user_time[child_pid]
+    # total_children_system_time = 0.0
+    # for child_pid in children_system_time:
+    #     total_children_system_time += children_system_time[child_pid]
+    # d['psutil_process_time_user'] += total_children_user_time
+    # d['psutil_process_time_system'] += total_children_system_time
 
     if profiler:
         event_counters = profiler.read_events()

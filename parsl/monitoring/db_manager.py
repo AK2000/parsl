@@ -228,7 +228,6 @@ class Database:
         run_id = Column('run_id', Text, sa.ForeignKey(
             'workflow.run_id'), nullable=False)
         timestamp = Column('timestamp', DateTime, nullable=False)
-        name = Column('name', Text, nullable=True)
         psutil_process_pid = Column(
             'psutil_process_pid', Integer, nullable=True)
         psutil_process_memory_percent = Column(
@@ -249,6 +248,10 @@ class Database:
             'psutil_process_disk_write', Float, nullable=True)
         psutil_process_status = Column(
             'psutil_process_status', Text, nullable=True)
+        psutil_process_name = Column(
+            'psutil_process_name', Text, nullable=True)
+        psutil_process_ppid = Column(
+            'psutil_process_ppid', Text, nullable=True)
 
         perf_unhalted_core_cycles = Column(
             'perf_unhalted_core_cycles', Integer, nullable=True)
