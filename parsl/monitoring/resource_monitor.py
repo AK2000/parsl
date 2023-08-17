@@ -38,9 +38,10 @@ def measure_resource_utilization(run_id: str,
                            proc: psutil.Process, 
                            profiler: Any = None):
 
-    children_user_time = {}  # type: Dict[int, float]
-    children_system_time = {}  # type: Dict[int, float]
+    # children_user_time = {}  # type: Dict[int, float]
+    # children_system_time = {}  # type: Dict[int, float]
 
+    d = dict()
     d["run_id"] = run_id
     d["pid"] = proc.info["pid"]
     d['hostname'] = platform.node()
