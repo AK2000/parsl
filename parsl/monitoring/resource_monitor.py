@@ -149,6 +149,7 @@ def start_file_logger(filename, rank, name=__name__, level=logging.DEBUG, format
     handler.setLevel(level)
     formatter = logging.Formatter(format_string, datefmt='%Y-%m-%d %H:%M:%S')
     handler.setFormatter(formatter)
+    logger.handlers.clear()
     logger.addHandler(handler)
     return logger
 
