@@ -145,16 +145,18 @@ def start_file_logger(filename, rank, name=__name__, level=logging.DEBUG, format
                         "[%(levelname)s]  %(message)s"
 
     logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
+    if logger.hasHandlers():
+        logger.handlers = []
+
+    logger.setLevel(level)
     handler = logging.FileHandler(filename)
     handler.setLevel(level)
     formatter = logging.Formatter(format_string, datefmt='%Y-%m-%d %H:%M:%S')
     handler.setFormatter(formatter)
-    logger.handlers.clear()
     logger.addHandler(handler)
+    
     return logger
 
-@wrap_with_logs
 def resource_monitor_loop(monitoring_hub_url: str,
             manager_id: str,
             run_id: str,
