@@ -67,36 +67,37 @@ def measure_resource_utilization(run_id: str,
             d['psutil_process_disk_write'] = 0
             d['psutil_process_disk_read'] = 0
 
-        # logging.debug("getting children")
-        # children = proc.children(recursive=True)
-        # d['psutil_process_children_count'] = len(children)
-        # logging.debug("got children")
+        logging.debug("getting children")
+        children = proc.children(recursive=True)
+        d['psutil_process_children_count'] = len(children)
+        logging.debug("got children")
 
-        # for child in children:
-        #     for k, v in child.as_dict(attrs=summable_values).items():
-        #         d['psutil_process_' + str(k)] += v
-        #     child_user_time = child.cpu_times().user
-        #     child_system_time = child.cpu_times().system
-        #     children_user_time[child.pid] = child_user_time
-        #     children_system_time[child.pid] = child_system_time
-        #     d['psutil_process_memory_virtual'] += child.memory_info().vms
-        #     d['psutil_process_memory_resident'] += child.memory_info().rss
-        #     try:
-        #         d['psutil_process_disk_write'] += child.io_counters().write_chars
-        #         d['psutil_process_disk_read'] += child.io_counters().read_chars
-        #     except Exception:
-        #         # occassionally pid temp files that hold this information are unvailable to be read so add zero
-        #         logging.exception("Exception reading IO counters for child {k}. Recorded IO usage may be incomplete".format(k=k), exc_info=True)
-        #         d['psutil_process_disk_write'] += 0
-        #         d['psutil_process_disk_read'] += 0
-        # total_children_user_time = 0.0
-        # for child_pid in children_user_time:
-        #     total_children_user_time += children_user_time[child_pid]
-        # total_children_system_time = 0.0
-        # for child_pid in children_system_time:
-        #     total_children_system_time += children_system_time[child_pid]
-        # d['psutil_process_time_user'] += total_children_user_time
-        # d['psutil_process_time_system'] += total_children_system_time
+        for child in children:
+            for k, v in child.as_dict(attrs=summable_values).items():
+                d['psutil_process_' + str(k)] += v
+            child_user_time = child.cpu_times().user
+            child_system_time = child.cpu_times().system
+            children_user_time[child.pid] = child_user_time
+            children_system_time[child.pid] = child_system_time
+            d['psutil_process_memory_virtual'] += child.memory_info().vms
+            d['psutil_process_memory_resident'] += child.memory_info().rss
+            try:
+                d['psutil_process_disk_write'] += child.io_counters().write_chars
+                d['psutil_process_disk_read'] += child.io_counters().read_chars
+            except Exception:
+                # occassionally pid temp files that hold this information are unvailable to be read so add zero
+                logging.exception("Exception reading IO counters for child {k}. Recorded IO usage may be incomplete".format(k=k), exc_info=True)
+                d['psutil_process_disk_write'] += 0
+                d['psutil_process_disk_read'] += 0
+        total_children_user_time = 0.0
+        for child_pid in children_user_time:
+            total_children_user_time += children_user_time[child_pid]
+        total_children_system_time = 0.0
+        for child_pid in children_system_time:
+            total_children_system_time += children_system_time[child_pid]
+        d['psutil_process_time_user'] += total_children_user_time
+        d['psutil_process_time_system'] += total_children_system_time
+
     else:
         event_counters = profiler.read_events()
         event_counters = profiler._Profiler__format_data([event_counters,])
@@ -215,6 +216,7 @@ def resource_monitor_loop(monitoring_hub_url: str,
                     profilers[proc.info["pid"]] = profiler
                 except Exception:
                     logger.exception("Exception starting performance counter profiler", exc_info=True)
+                    profilers[proc.info["pid"]] = None
                 else:
                     logger.info("Started performance counter for process {}".format(proc.info["pid"]))
             

@@ -15,7 +15,8 @@ extras_require = {
         'flask_sqlalchemy',
         'pandas<2',
         'plotly',
-        'python-daemon'
+        'python-daemon',
+        'performance_features @ git+https://github.com/AK2000/performance_features',
     ],
     'aws' : ['boto3'],
     'kubernetes' : ['kubernetes'],
