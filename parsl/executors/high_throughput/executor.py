@@ -354,9 +354,9 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin):
                                        accelerators=" ".join(self.available_accelerators),
                                        start_method=self.start_method,
                                        monitor_resources=monitor_resources,
-                                       url="" if not monitor_resources else self.monitoring_hub_url,
-                                       run_id=self.run_id,
-                                       radio_mode=self.radio_mode,
+                                       url="fake" if not monitor_resources else self.monitoring_hub_url,
+                                       run_id="0" if not self.run_id else self.run_id,
+                                       radio_mode="fake" if not self.radio_mode else self.radio_mode,
                                        rundir=self.run_dir,
                                        sleep_dur= 0 if not monitor_resources else self.resource_monitoring_interval,
                                        energy_monitor=energy_monitor)
