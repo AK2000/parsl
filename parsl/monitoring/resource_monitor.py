@@ -201,7 +201,7 @@ def resource_monitor_loop(monitoring_hub_url: str,
     next_send = time.time()
 
     while not terminate_event.is_set():
-        logger.info("start of monitoring loop")
+        logger.debug("start of monitoring loop")
         for proc in psutil.process_iter(['pid', 'username', 'name', 'ppid']):
             if proc.info["username"] != user_name or proc.info["pid"] == os.getpid():
                 continue
@@ -218,13 +218,13 @@ def resource_monitor_loop(monitoring_hub_url: str,
                     logger.exception("Exception starting performance counter profiler", exc_info=True)
                     profilers[proc.info["pid"]] = None
                 else:
-                    logger.info("Started performance counter for process {}".format(proc.info["pid"]))
+                    logger.debug("Started performance counter for process {}".format(proc.info["pid"]))
             
             profiler = profilers.get(proc.info["pid"])
 
             try:
                 d = measure_resource_utilization(run_id, proc, profiler)
-                logger.info("Sending intermediate resource message")
+                logger.debug("Sending intermediate resource message")
                 radio.send((MessageType.RESOURCE_INFO, d))
             except Exception:
                 logger.exception("Exception getting the resource usage. Not sending usage to Hub", exc_info=True)
@@ -232,7 +232,7 @@ def resource_monitor_loop(monitoring_hub_url: str,
         if energy_monitor:
             try:
                 d = measure_energy_use(energy_monitor, run_id, block_id, sleep_dur)
-                logger.info("Sending energy message")
+                logger.debug("Sending energy message")
                 radio.send((MessageType.ENERGY_INFO, d))
             except Exception:
                 logger.exception("Exception getting the resource usage. Not sending usage to Hub", exc_info=True)
