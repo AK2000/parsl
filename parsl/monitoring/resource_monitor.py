@@ -218,7 +218,6 @@ def resource_monitor_loop(monitoring_hub_url: str,
                     profiler._Profiler__initialize()
                     profiler.reset_events()
                     profiler.enable_events()
-                    profiler.program.start()
                     profilers[proc.info["pid"]] = profiler
                 except Exception:
                     logger.exception("Exception starting performance counter profiler", exc_info=True)
