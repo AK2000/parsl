@@ -52,6 +52,9 @@ def measure_resource_utilization(run_id: str,
     d["psutil_process_ppid"] = proc.info["ppid"]
 
     if not profiler:
+        children_user_time = {}
+        children_system_time = {}
+
         d.update({"psutil_process_" + str(k): v for k, v in proc.as_dict().items() if k in simple})
         d["psutil_cpu_count"] = psutil.cpu_count()
         d['psutil_process_memory_virtual'] = proc.memory_info().vms
@@ -172,10 +175,13 @@ def resource_monitor_loop(monitoring_hub_url: str,
     """
 
     setproctitle("parsl: resource monitor")
+    avail_cores = sorted(os.sched_getaffinity(0))
+    my_cores = avail_cores[-1:]
+    os.sched_setaffinity(0, my_cores)
 
     logger = start_file_logger('{}/block-{}/{}/resource_monitor.log'.format(run_dir, block_id, manager_id),
                                    0,
-                                   level=logging_level)
+                                   level=logging.DEBUG)
     logger.warning("Starting resource monitor!")
 
     radio: MonitoringRadio
