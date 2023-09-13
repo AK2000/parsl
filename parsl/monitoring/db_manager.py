@@ -225,6 +225,7 @@ class Database:
     class Resource(Base):
         __tablename__ = RESOURCE
         pid = Column('pid', Integer, nullable=False)
+        block_id = Column('block_id', Text, nullable=False)
         run_id = Column('run_id', Text, sa.ForeignKey(
             'workflow.run_id'), nullable=False)
         timestamp = Column('timestamp', DateTime, nullable=False)
@@ -263,7 +264,7 @@ class Database:
             'perf_instructions_retired', Integer, nullable=True)
 
         __table_args__ = (
-            PrimaryKeyConstraint('pid', 'run_id', 'timestamp'),
+            PrimaryKeyConstraint('pid', 'block_id', 'run_id', 'timestamp'),
         )
 
     class Energy(Base):

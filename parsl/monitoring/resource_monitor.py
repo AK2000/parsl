@@ -35,6 +35,7 @@ events= [['UNHALTED_CORE_CYCLES'], ['UNHALTED_REFERENCE_CYCLES'], ['LLC_MISSES']
 
 
 def measure_resource_utilization(run_id: str,
+                           block_id: int,
                            proc: psutil.Process, 
                            profiler: Any = None):
 
@@ -43,6 +44,7 @@ def measure_resource_utilization(run_id: str,
 
     d = dict()
     d["run_id"] = run_id
+    d["block_id"] = block_id
     d["pid"] = proc.info["pid"]
     d['hostname'] = platform.node()
     d['first_msg'] = False
@@ -228,7 +230,7 @@ def resource_monitor_loop(monitoring_hub_url: str,
             profiler = profilers.get(proc.info["pid"])
 
             try:
-                d = measure_resource_utilization(run_id, proc, profiler)
+                d = measure_resource_utilization(run_id, block_id, proc, profiler)
                 logger.debug("Sending intermediate resource message")
                 radio.send((MessageType.RESOURCE_INFO, d))
             except Exception:
