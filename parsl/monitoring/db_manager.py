@@ -255,13 +255,13 @@ class Database:
             'psutil_process_ppid', Text, nullable=True)
 
         perf_unhalted_core_cycles = Column(
-            'perf_unhalted_core_cycles', Integer, nullable=True)
+            'perf_unhalted_core_cycles', BigInteger, nullable=True)
         perf_unhalted_reference_cycles = Column(
-            'perf_unhalted_reference_cycles', Integer, nullable=True)
+            'perf_unhalted_reference_cycles', BigInteger, nullable=True)
         perf_llc_misses = Column(
-            'perf_llc_misses', Integer, nullable=True)
+            'perf_llc_misses', BigInteger, nullable=True)
         perf_instructions_retired = Column(
-            'perf_instructions_retired', Integer, nullable=True)
+            'perf_instructions_retired', BigInteger, nullable=True)
 
         __table_args__ = (
             PrimaryKeyConstraint('pid', 'block_id', 'run_id', 'timestamp'),
@@ -296,11 +296,15 @@ class DatabaseManager:
         self.logdir = logdir
         os.makedirs(self.logdir, exist_ok=True)
 
-        logger.propagate = False
+        # logger.propagate = False
 
-        set_file_logger("{}/database_manager.log".format(self.logdir), level=logging_level,
+        set_file_logger("{}/database_manager_2.log".format(self.logdir), level=logging_level,
                         format_string="%(asctime)s.%(msecs)03d %(name)s:%(lineno)d [%(levelname)s] [%(threadName)s %(thread)d] %(message)s",
-                        name="database_manager")
+                        name="database_manager_2")
+
+        global logger 
+
+        logger = logging.getLogger("database_manager_2")
 
         logger.debug("Initializing Database Manager process")
 
@@ -599,7 +603,7 @@ class DatabaseManager:
         if exception_happened:
             raise RuntimeError("An exception happened sometime during database processing and should have been logged in database_manager.log")
 
-    @wrap_with_logs(target="database_manager")
+    # @wrap_with_logs(target="database_manager")
     def _migrate_logs_to_internal(self, logs_queue: queue.Queue, queue_tag: str, kill_event: threading.Event) -> None:
         logger.info("Starting processing for queue {}".format(queue_tag))
 
@@ -745,7 +749,7 @@ class DatabaseManager:
         self._kill_event.set()
 
 
-@wrap_with_logs(target="database_manager")
+# @wrap_with_logs(target="database_manager")
 def dbm_starter(exception_q: "queue.Queue[Tuple[str, str]]",
                 priority_msgs: "queue.Queue[TaggedMonitoringMessage]",
                 node_msgs: "queue.Queue[MonitoringMessage]",

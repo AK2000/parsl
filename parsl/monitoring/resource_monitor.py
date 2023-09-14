@@ -177,10 +177,6 @@ def resource_monitor_loop(monitoring_hub_url: str,
     """
 
     setproctitle("parsl: resource monitor")
-    avail_cores = sorted(os.sched_getaffinity(0))
-    my_cores = avail_cores[-1:]
-    os.sched_setaffinity(0, my_cores)
-
     logger = start_file_logger('{}/block-{}/{}/resource_monitor.log'.format(run_dir, block_id, manager_id),
                                    0,
                                    level=logging.DEBUG)
@@ -231,7 +227,7 @@ def resource_monitor_loop(monitoring_hub_url: str,
 
             try:
                 d = measure_resource_utilization(run_id, block_id, proc, profiler)
-                logger.debug("Sending intermediate resource message")
+                logger.debug("Sending intermediate resource message".format(d))
                 radio.send((MessageType.RESOURCE_INFO, d))
             except Exception:
                 logger.exception("Exception getting the resource usage. Not sending usage to Hub", exc_info=True)
