@@ -21,6 +21,23 @@ def test_rapl_monitor():
     
     import json
     assert json.dumps(new_result.dict()["devices"])
+
+@pytest.mark.local
+def test_nvml_monitor():
+    monitor = NVMLGPUEnergyMonitor(debug=True)
+    result = monitor.report()
+    print(result)
+    assert result
+
+    time.sleep(2)
+
+    new_result = monitor.report()
+    print(new_result)
+    assert new_result.start_time == result.end_time
+    assert new_result.total_energy > 0
+
+    import json
+    assert json.dumps(new_result.dict()["devices"])
     
     
 

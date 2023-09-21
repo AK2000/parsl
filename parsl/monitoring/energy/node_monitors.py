@@ -171,26 +171,36 @@ class NVMLGPUEnergyMonitor(NodeEnergyMonitor):
     """ Monitor the energy of NVidia GPUs using Nvidia NVML
     Requires NVML Python library.
     """
-    import pynvml
 
     def __init__(self, debug: bool = True):
+        from pynvml import nvmlDeviceGetCount
+        from pynvml import nvmlDeviceGetHandleByIndex
+        from pynvml import nvmlDeviceGetTotalEnergyConsumption
+        from pynvml import nvmlInit
+
         super().__init__(debug=debug)
 
-        pynvml.nvmlInit()
-        device_count = pynvml.nvmlDeviceGetCount()
+        nvmlInit()
+        device_count = nvmlDeviceGetCount()
         self.prev_time = 0 
-        self.handles = [pynvml.nvmlDeviceGetHandleByIndex(i) for i in range(device_count)]
-        self.prev_energy = [pynvml.nvmlDeviceGetTotalEnergyConsumption(h)*10**3 for h in self.handles]
+        self.handles = [nvmlDeviceGetHandleByIndex(i) for i in range(device_count)]
+        self.prev_energy = [nvmlDeviceGetTotalEnergyConsumption(h)*10**3 for h in self.handles]
+        print(self.prev_energy)
         self.report()
 
     def __del__(self):
+        from pynvml import nvmlShutdown
         nvmlShutdown()
 
     def report(self):
-        energy_uj = [pynvml.nvmlDeviceGetTotalEnergyConsumption(h)*10**3 - self.prev_energy[i] for i,h in enumerate(self.handles)]
+        from pynvml import nvmlDeviceGetTotalEnergyConsumption
+        energy_uj = [nvmlDeviceGetTotalEnergyConsumption(h)*10**3 for h in self.handles]
         end_time = time.clock_gettime(time.CLOCK_MONOTONIC)
 
-        result = Result(self.prev_time, end_time, sum(energy_uj))
+        print("energy", energy_uj)
+        result = Result(self.prev_time, end_time, sum([n-p for n,p in zip(energy_uj, self.prev_energy)]))
+        self.prev_energy = energy_uj
+        self.prev_time = end_time
         return result
 
 class PapiEnergyMonitor(NodeEnergyMonitor):
