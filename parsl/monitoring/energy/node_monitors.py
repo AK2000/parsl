@@ -8,6 +8,17 @@ from parsl.monitoring.energy.utils import j_to_uj
 
 logger = logging.getLogger(__name__)
 
+try:
+    from pynvml import nvmlDeviceGetCount
+    from pynvml import nvmlDeviceGetName
+    from pynvml import nvmlDeviceGetHandleByIndex
+    from pynvml import nvmlDeviceGetTotalEnergyConsumption
+    from pynvml import nvmlInit
+    from pynvml import nvmlShutdown
+except ImportError as e:
+    logger.warn('pynvml module not found. Will not be able to perform GPU monitoring')
+
+
 class RaplCPUNodeEnergyMonitor(NodeEnergyMonitor):
     """ Monitor energy using sysfs files created by intel RAPL
     In a large part derived from PyRAPL[https://github.com/powerapi-ng/pyRAPL/tree/master]
@@ -173,10 +184,6 @@ class NVMLGPUEnergyMonitor(NodeEnergyMonitor):
     """
 
     def __init__(self, debug: bool = True):
-        from pynvml import nvmlDeviceGetCount
-        from pynvml import nvmlDeviceGetHandleByIndex
-        from pynvml import nvmlDeviceGetTotalEnergyConsumption
-        from pynvml import nvmlInit
 
         super().__init__(debug=debug)
 
@@ -185,23 +192,33 @@ class NVMLGPUEnergyMonitor(NodeEnergyMonitor):
         self.prev_time = 0 
         self.handles = [nvmlDeviceGetHandleByIndex(i) for i in range(device_count)]
         self.prev_energy = [nvmlDeviceGetTotalEnergyConsumption(h)*10**3 for h in self.handles]
-        print(self.prev_energy)
         self.report()
 
     def __del__(self):
-        from pynvml import nvmlShutdown
         nvmlShutdown()
 
     def report(self):
-        from pynvml import nvmlDeviceGetTotalEnergyConsumption
         energy_uj = [nvmlDeviceGetTotalEnergyConsumption(h)*10**3 for h in self.handles]
-        end_time = time.clock_gettime(time.CLOCK_MONOTONIC)
+        end_time = 0
+        total_energy = 0
+        cur_energy: list[float] = []
+        devices: dict[str, Result] = {}
 
-        print("energy", energy_uj)
-        result = Result(self.prev_time, end_time, sum([n-p for n,p in zip(energy_uj, self.prev_energy)]))
-        self.prev_energy = energy_uj
+        for i, h in enumerate(self.handles):
+            energy_uj = self.mj_to_uj(nvmlDeviceGetTotalEnergyConsumption(h))
+            end_time = time.clock_gettime(time.CLOCK_MONOTONIC)
+            devices[nvmlDeviceGetName(h)] = Result(self.prev_time, end_time, energy_uj - self.prev_energy[i])
+            cur_energy.append(energy_uj)
+            total_energy += energy_uj
+
+        result = Result(self.prev_time, end_time, total_energy - sum(self.prev_energy), devices=devices)
+        self.prev_energy = cur_energy
         self.prev_time = end_time
         return result
+    
+    @staticmethod
+    def mj_to_uj(energy: float):
+        return energy * 10**3
 
 class PapiEnergyMonitor(NodeEnergyMonitor):
     """ Monitor energy using the hardware counters provided PAPI. 
