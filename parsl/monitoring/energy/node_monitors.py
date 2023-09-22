@@ -207,7 +207,7 @@ class NVMLGPUEnergyMonitor(NodeEnergyMonitor):
         for i, h in enumerate(self.handles):
             energy_uj = self.mj_to_uj(nvmlDeviceGetTotalEnergyConsumption(h))
             end_time = time.clock_gettime(time.CLOCK_MONOTONIC)
-            devices[nvmlDeviceGetName(h)] = Result(self.prev_time, end_time, energy_uj - self.prev_energy[i])
+            devices[f'{nvmlDeviceGetName(h)}-{i}'] = Result(self.prev_time, end_time, energy_uj - self.prev_energy[i])
             cur_energy.append(energy_uj)
             total_energy += energy_uj
 
