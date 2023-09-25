@@ -263,6 +263,16 @@ class Database:
         perf_instructions_retired = Column(
             'perf_instructions_retired', BigInteger, nullable=True)
 
+        gpu_device_name = Column(
+            'gpu_device_name', Text, nullable=True
+        )
+        gpu_process_smUtil = Column(
+            'gpu_process_smUtil', Integer, nullable=True
+        )
+        gpu_process_memUtil = Column(
+            'gpu_process_memUtil', Integer, nullable=True
+        )
+
         __table_args__ = (
             PrimaryKeyConstraint('pid', 'block_id', 'run_id', 'timestamp'),
         )

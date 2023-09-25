@@ -24,7 +24,19 @@ try:
 except ImportError:
     _perf_counters_enabled = False
 else:
-    _perf_counters_enabled = True
+    _perf_counters_enabled = False #True
+
+try:
+    from pynvml import nvmlDeviceGetCount
+    from pynvml import nvmlDeviceGetName
+    from pynvml import nvmlDeviceGetHandleByIndex
+    from pynvml import nvmlDeviceGetProcessUtilization
+    from pynvml import nvmlInit
+    from pynvml import nvmlShutdown
+except ImportError:
+    _gpu_monitoring = False
+else:
+    _gpu_monitoring = True
 
 # these values are simple to log. Other information is available in special formats such as memory below.
 simple = ["cpu_num", 'create_time', 'cwd', 'exe', 'memory_percent', 'nice', 'name', 'num_threads', 'pid', 'ppid', 'status', 'username']
@@ -37,7 +49,8 @@ events= [['UNHALTED_CORE_CYCLES'], ['UNHALTED_REFERENCE_CYCLES'], ['LLC_MISSES']
 def measure_resource_utilization(run_id: str,
                            block_id: int,
                            proc: psutil.Process, 
-                           profiler: Any = None):
+                           profiler: Any = None,
+                           gpu_processes: Any = None):
 
     # children_user_time = {}  # type: Dict[int, float]
     # children_system_time = {}  # type: Dict[int, float]
@@ -71,6 +84,11 @@ def measure_resource_utilization(run_id: str,
             logging.exception("Exception reading IO counters for main process. Recorded IO usage may be incomplete", exc_info=True)
             d['psutil_process_disk_write'] = 0
             d['psutil_process_disk_read'] = 0
+
+        if gpu_processes is not None:
+            d['gpu_device_name'] = gpu_processes[proc.info['pid']][0][0]
+            d['gpu_process_smUtil'] = str(gpu_processes[proc.info['pid']][0][1].smUtil)
+            d['gpu_process_memUtil'] = str(gpu_processes[proc.info['pid']][0][1].memUtil)
 
         logging.debug("getting children")
         children = proc.children(recursive=True)
@@ -176,6 +194,9 @@ def resource_monitor_loop(monitoring_hub_url: str,
     """Monitors the Parsl task's resources by pointing psutil to the task's pid and watching it and its children.
     """
 
+    gpu_handles: list = []
+    gpu_processes: dict[str, tuple] = {}
+
     setproctitle("parsl: resource monitor")
     logger = start_file_logger('{}/block-{}/{}/resource_monitor.log'.format(run_dir, block_id, manager_id),
                                    0,
@@ -204,6 +225,11 @@ def resource_monitor_loop(monitoring_hub_url: str,
     
     next_send = time.time()
 
+    if _gpu_monitoring:
+        nvmlInit()
+        N_GPUS = nvmlDeviceGetCount()
+        gpu_handles = [nvmlDeviceGetHandleByIndex(i) for i in range(N_GPUS)]
+
     while not terminate_event.is_set():
         logger.debug("start of monitoring loop")
         for proc in psutil.process_iter(['pid', 'username', 'name', 'ppid']):
@@ -226,7 +252,21 @@ def resource_monitor_loop(monitoring_hub_url: str,
             profiler = profilers.get(proc.info["pid"])
 
             try:
-                d = measure_resource_utilization(run_id, block_id, proc, profiler)
+                gpu_stats = None
+
+                if _gpu_monitoring:
+                    timestamp = int(time.time())
+                    processes = [nvmlDeviceGetProcessUtilization(h, timestamp) for h in gpu_handles]
+
+                    # reorganizing data so we can access by pid
+                    for i, dev_procs in enumerate(processes):
+                        for gpu_proc in dev_procs:
+                            if proc.pid not in gpu_processes:
+                                gpu_processes[proc.pid] = [(f'{nvmlDeviceGetName(gpu_handles[i])}-{i}', gpu_proc)]
+                            else: # think this is unlikely, but just in case process is shared between devices
+                                gpu_processes[proc.pid].append((f'{nvmlDeviceGetName(gpu_handles[i])}-{i}', gpu_proc))
+                    
+                d = measure_resource_utilization(run_id, block_id, proc, profiler, gpu_processes)
                 logger.debug("Sending intermediate resource message".format(d))
                 radio.send((MessageType.RESOURCE_INFO, d))
             except Exception:
