@@ -48,6 +48,7 @@ class RaplCPUNodeEnergyMonitor(NodeEnergyMonitor):
 
         if self.prev_reading is not None:
             result = reading  - self.prev_reading
+            result.total_energy = max(result.total_energy, 0)
         else:
             result = reading
 
