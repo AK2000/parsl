@@ -4,6 +4,7 @@ import queue
 import os
 import time
 import datetime
+import concurrent.futures
 
 from typing import Any, Dict, List, Optional, Set, Tuple, TypeVar, cast
 
@@ -30,6 +31,14 @@ except ImportError:
     _sqlalchemy_enabled = False
 else:
     _sqlalchemy_enabled = True
+
+try:
+    from diaspora_event_sdk import KafkaProducer
+except ImportError:
+    _kafka_enabled = False
+else:
+    _kafka_enabled = True
+    logger.warning("Writing Monitoring Messages to Kafka")
 
 
 WORKFLOW = 'workflow'    # Workflow table includes workflow metadata
@@ -67,6 +76,9 @@ class Database:
         Session = sessionmaker(bind=self.eng)
         self.session = Session()
 
+        if _kafka_enabled:
+            self.producer = KafkaProducer()
+
     def _get_mapper(self, table_obj: Table) -> Mapper:
         all_mappers: Set[Mapper] = set()
         for mapper_registry in mapperlib._all_registries():  # type: ignore
@@ -93,12 +105,48 @@ class Database:
         self.session.bulk_update_mappings(mapper, mappings)
         self.session.commit()
 
+        if _kafka_enabled:
+            all_sends = []
+            for message in messages:
+                message = dict(message)
+                for k, v in message.items():
+                    if isinstance(v, datetime.datetime):
+                        message[k] = v.time().isoformat()
+                message["type"] = table
+                logger.info("Starting kafka producer send")
+                all_sends.append(self.producer.send("green-faas", message))
+                logger.info("Successfuly queue message for sending")
+            
+            logger.info("Waiting for kafka futures")
+            for f in all_sends:
+                logger.info(f.get())
+            logger.info("All kafka futures completed")
+            
+
+
     def insert(self, *, table: str, messages: List[MonitoringMessage]) -> None:
         table_obj = self.meta.tables[table]
         mappings = self._generate_mappings(table_obj, messages=messages)
         mapper = self._get_mapper(table_obj)
         self.session.bulk_insert_mappings(mapper, mappings)
         self.session.commit()
+
+        if _kafka_enabled:
+            all_sends = []
+            for message in messages:
+                message = dict(message)
+                for k, v in message.items():
+                    if isinstance(v, datetime.datetime):
+                        message[k] = v.time().isoformat()
+                message["type"] = table
+                logger.info("Starting kafka producer send")
+                all_sends.append(self.producer.send("green-faas", message))
+                logger.info("Successfuly queue message for sending")
+            
+            logger.info("Waiting for kafka futures")
+            for f in all_sends:
+                logger.info(f.get())
+            logger.info("All kafka futures completed")
 
     def rollback(self) -> None:
         self.session.rollback()
@@ -603,6 +651,9 @@ class DatabaseManager:
         if exception_happened:
             raise RuntimeError("An exception happened sometime during database processing and should have been logged in database_manager.log")
 
+        if _kafka_enabled:
+            self.db.producer.flush()
+
     # @wrap_with_logs(target="database_manager")
     def _migrate_logs_to_internal(self, logs_queue: queue.Queue, queue_tag: str, kill_event: threading.Event) -> None:
         logger.info("Starting processing for queue {}".format(queue_tag))
@@ -747,6 +798,7 @@ class DatabaseManager:
         self.batching_interval = float('inf')
         self.batching_threshold = float('inf')
         self._kill_event.set()
+            
 
 
 # @wrap_with_logs(target="database_manager")
