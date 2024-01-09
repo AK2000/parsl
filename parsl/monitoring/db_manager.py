@@ -60,6 +60,7 @@ class Database:
 
     def __init__(self,
                  url: str = 'sqlite:///runinfomonitoring.db',
+                 kafka_topic: str = 'green-faas',
                  ):
 
         self.eng = sa.create_engine(url)
@@ -77,6 +78,7 @@ class Database:
         self.session = Session()
 
         if _kafka_enabled:
+            self.kafka_topic = kafka_topic
             self.producer = KafkaProducer()
 
     def _get_mapper(self, table_obj: Table) -> Mapper:
@@ -114,7 +116,7 @@ class Database:
                         message[k] = v.time().isoformat()
                 message["type"] = table
                 logger.info("Starting kafka producer send")
-                all_sends.append(self.producer.send("green-faas", message))
+                all_sends.append(self.producer.send(self.kafka_topic, message))
                 logger.info("Successfuly queue message for sending")
             
             logger.info("Waiting for kafka futures")
@@ -140,7 +142,7 @@ class Database:
                         message[k] = v.time().isoformat()
                 message["type"] = table
                 logger.info("Starting kafka producer send")
-                all_sends.append(self.producer.send("green-faas", message))
+                all_sends.append(self.producer.send(self.kafka_topic, message))
                 logger.info("Successfuly queue message for sending")
             
             logger.info("Waiting for kafka futures")
@@ -334,6 +336,7 @@ class DatabaseManager:
     def __init__(self,
                  db_url: str = 'sqlite:///runinfo/monitoring.db',
                  logdir: str = '.',
+                 kafka_topic: str = 'green-faas',
                  logging_level: int = logging.INFO,
                  batching_interval: float = 1,
                  batching_threshold: float = 99999,
@@ -356,7 +359,7 @@ class DatabaseManager:
 
         logger.debug("Initializing Database Manager process")
 
-        self.db = Database(db_url)
+        self.db = Database(db_url, kafka_topic=kafka_topic)
         self.batching_interval = batching_interval
         self.batching_threshold = batching_threshold
 
@@ -809,6 +812,7 @@ def dbm_starter(exception_q: "queue.Queue[Tuple[str, str]]",
                 resource_msgs: "queue.Queue[MonitoringMessage]",
                 energy_msgs: "queue.Queue[MonitoringMessage]",
                 db_url: str,
+                kafka_topic: str,
                 logdir: str,
                 logging_level: int) -> None:
     """Start the database manager process
@@ -821,7 +825,8 @@ def dbm_starter(exception_q: "queue.Queue[Tuple[str, str]]",
     try:
         dbm = DatabaseManager(db_url=db_url,
                               logdir=logdir,
-                              logging_level=logging_level)
+                              logging_level=logging_level,
+                              kafka_topic=kafka_topic)
         logger.info("Starting dbm in dbm starter")
         dbm.start(priority_msgs, node_msgs, block_msgs, resource_msgs, energy_msgs)
     except KeyboardInterrupt:

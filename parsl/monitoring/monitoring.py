@@ -84,6 +84,7 @@ class MonitoringHub(RepresentationMixin):
                  workflow_name: Optional[str] = None,
                  workflow_version: Optional[str] = None,
                  logging_endpoint: str = 'sqlite:///runinfo/monitoring.db',
+                 kafka_topic: str = 'green-faas',
                  logdir: Optional[str] = None,
                  monitoring_debug: bool = False,
                  resource_monitoring_enabled: bool = True,
@@ -149,6 +150,7 @@ class MonitoringHub(RepresentationMixin):
         self.hub_port_range = hub_port_range
 
         self.logging_endpoint = logging_endpoint
+        self.kafka_topic = kafka_topic
         self.logdir = logdir
         self.monitoring_debug = monitoring_debug
 
@@ -223,6 +225,7 @@ class MonitoringHub(RepresentationMixin):
                                     kwargs={"logdir": self.logdir,
                                             "logging_level": logging.DEBUG if self.monitoring_debug else logging.INFO,
                                             "db_url": self.logging_endpoint,
+                                            "kafka_topic": self.kafka_topic
                                     },
                                     name="Monitoring-DBM-Process",
                                     daemon=True,
@@ -243,7 +246,6 @@ class MonitoringHub(RepresentationMixin):
         except queue.Empty:
             self.logger.error("Hub has not completed initialization in 120s. Aborting")
             raise Exception("Hub failed to start")
-
         if isinstance(comm_q_result, str):
             self.logger.error(f"MonitoringRouter sent an error message: {comm_q_result}")
             raise RuntimeError(f"MonitoringRouter failed to start: {comm_q_result}")
