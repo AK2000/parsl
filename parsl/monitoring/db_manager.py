@@ -32,14 +32,6 @@ except ImportError:
 else:
     _sqlalchemy_enabled = True
 
-try:
-    from diaspora_event_sdk import KafkaProducer
-except ImportError:
-    _kafka_enabled = False
-else:
-    _kafka_enabled = True
-    logger.warning("Writing Monitoring Messages to Kafka")
-
 
 WORKFLOW = 'workflow'    # Workflow table includes workflow metadata
 TASK = 'task'            # Task table includes task metadata
@@ -60,7 +52,6 @@ class Database:
 
     def __init__(self,
                  url: str = 'sqlite:///runinfomonitoring.db',
-                 kafka_topic: str = 'green-faas',
                  ):
 
         self.eng = sa.create_engine(url)
@@ -76,10 +67,6 @@ class Database:
 
         Session = sessionmaker(bind=self.eng)
         self.session = Session()
-
-        if _kafka_enabled:
-            self.kafka_topic = kafka_topic
-            self.producer = KafkaProducer()
 
     def _get_mapper(self, table_obj: Table) -> Mapper:
         all_mappers: Set[Mapper] = set()
@@ -107,48 +94,12 @@ class Database:
         self.session.bulk_update_mappings(mapper, mappings)
         self.session.commit()
 
-        if _kafka_enabled:
-            all_sends = []
-            for message in messages:
-                message = dict(message)
-                for k, v in message.items():
-                    if isinstance(v, datetime.datetime):
-                        message[k] = v.time().isoformat()
-                message["type"] = table
-                logger.info("Starting kafka producer send")
-                all_sends.append(self.producer.send(self.kafka_topic, message))
-                logger.info("Successfuly queue message for sending")
-            
-            logger.info("Waiting for kafka futures")
-            for f in all_sends:
-                logger.info(f.get())
-            logger.info("All kafka futures completed")
-            
-
-
     def insert(self, *, table: str, messages: List[MonitoringMessage]) -> None:
         table_obj = self.meta.tables[table]
         mappings = self._generate_mappings(table_obj, messages=messages)
         mapper = self._get_mapper(table_obj)
         self.session.bulk_insert_mappings(mapper, mappings)
         self.session.commit()
-
-        if _kafka_enabled:
-            all_sends = []
-            for message in messages:
-                message = dict(message)
-                for k, v in message.items():
-                    if isinstance(v, datetime.datetime):
-                        message[k] = v.time().isoformat()
-                message["type"] = table
-                logger.info("Starting kafka producer send")
-                all_sends.append(self.producer.send(self.kafka_topic, message))
-                logger.info("Successfuly queue message for sending")
-            
-            logger.info("Waiting for kafka futures")
-            for f in all_sends:
-                logger.info(f.get())
-            logger.info("All kafka futures completed")
 
     def rollback(self) -> None:
         self.session.rollback()
@@ -336,7 +287,6 @@ class DatabaseManager:
     def __init__(self,
                  db_url: str = 'sqlite:///runinfo/monitoring.db',
                  logdir: str = '.',
-                 kafka_topic: str = 'green-faas',
                  logging_level: int = logging.INFO,
                  batching_interval: float = 1,
                  batching_threshold: float = 99999,
@@ -359,7 +309,7 @@ class DatabaseManager:
 
         logger.debug("Initializing Database Manager process")
 
-        self.db = Database(db_url, kafka_topic=kafka_topic)
+        self.db = Database(db_url)
         self.batching_interval = batching_interval
         self.batching_threshold = batching_threshold
 
@@ -370,52 +320,16 @@ class DatabaseManager:
         self.pending_energy_queue = queue.Queue() # type: queue.Queue[MonitoringMessage]
 
     def start(self,
-              priority_queue: "queue.Queue[TaggedMonitoringMessage]",
-              node_queue: "queue.Queue[MonitoringMessage]",
-              block_queue: "queue.Queue[MonitoringMessage]",
-              resource_queue: "queue.Queue[MonitoringMessage]",
-              energy_queue: "queue.Queue[MonitoringMessage]") -> None:
+              message_queue: "queue.Queue[AddressedMonitoringMessage]") -> None:
 
         self._kill_event = threading.Event()
-        self._priority_queue_pull_thread = threading.Thread(target=self._migrate_logs_to_internal,
+        self._pull_thread = threading.Thread(target=self._migrate_logs_to_internal,
                                                             args=(
-                                                                priority_queue, 'priority', self._kill_event,),
-                                                            name="Monitoring-migrate-priority",
+                                                                message_queue, 'priority', self._kill_event,),
+                                                            name="Monitoring-migrate",
                                                             daemon=True,
                                                             )
-        self._priority_queue_pull_thread.start()
-
-        self._node_queue_pull_thread = threading.Thread(target=self._migrate_logs_to_internal,
-                                                        args=(
-                                                            node_queue, 'node', self._kill_event,),
-                                                        name="Monitoring-migrate-node",
-                                                        daemon=True,
-                                                        )
-        self._node_queue_pull_thread.start()
-
-        self._block_queue_pull_thread = threading.Thread(target=self._migrate_logs_to_internal,
-                                                         args=(
-                                                             block_queue, 'block', self._kill_event,),
-                                                         name="Monitoring-migrate-block",
-                                                         daemon=True,
-                                                         )
-        self._block_queue_pull_thread.start()
-
-        self._resource_queue_pull_thread = threading.Thread(target=self._migrate_logs_to_internal,
-                                                            args=(
-                                                                resource_queue, 'resource', self._kill_event,),
-                                                            name="Monitoring-migrate-resource",
-                                                            daemon=True,
-                                                            )
-        self._resource_queue_pull_thread.start()
-
-        self._energy_queue_pull_thread = threading.Thread(target=self._migrate_logs_to_internal,
-                                                            args=(
-                                                                energy_queue, 'energy', self._kill_event,),
-                                                            name="Monitoring-migrate-energy",
-                                                            daemon=True,
-                                                            )
-        self._energy_queue_pull_thread.start()
+        self._pull_thread.start()
 
         """
         maintain a set to track the tasks that are already INSERTed into database
@@ -444,9 +358,7 @@ class DatabaseManager:
                self.pending_priority_queue.qsize() != 0 or self.pending_resource_queue.qsize() != 0 or
                self.pending_node_queue.qsize() != 0 or self.pending_block_queue.qsize() != 0 or
                self.pending_energy_queue.qsize() != 0 or
-               priority_queue.qsize() != 0 or resource_queue.qsize() != 0 or
-               node_queue.qsize() != 0 or block_queue.qsize() != 0 or
-               energy_queue.qsize() != 0):
+               message_queue.qsize() != 0):
 
             """
             WORKFLOW_INFO and TASK_INFO messages (i.e. priority messages)
@@ -457,8 +369,7 @@ class DatabaseManager:
                                   self._kill_event.is_set(),
                                   self.pending_priority_queue.qsize() != 0, self.pending_resource_queue.qsize() != 0,
                                   self.pending_node_queue.qsize() != 0, self.pending_block_queue.qsize() != 0,
-                                  priority_queue.qsize() != 0, resource_queue.qsize() != 0,
-                                  node_queue.qsize() != 0, block_queue.qsize() != 0))
+                                  message_queue.qsize() != 0))
 
                 # This is the list of resource messages which can be reprocessed as if they
                 # had just arrived because the corresponding first task message has been
@@ -658,7 +569,7 @@ class DatabaseManager:
             self.db.producer.flush()
 
     # @wrap_with_logs(target="database_manager")
-    def _migrate_logs_to_internal(self, logs_queue: queue.Queue, queue_tag: str, kill_event: threading.Event) -> None:
+    def _migrate_logs_to_internal(self, logs_queue: queue.Queue, kill_event: threading.Event) -> None:
         logger.info("Starting processing for queue {}".format(queue_tag))
 
         while not kill_event.is_set() or logs_queue.qsize() != 0:
@@ -669,30 +580,9 @@ class DatabaseManager:
             except queue.Empty:
                 continue
             else:
-                if queue_tag == 'priority' and x == 'STOP':
+                if x == 'STOP':
                     self.close()
-                elif queue_tag == 'priority':  # implicitly not 'STOP'
-                    assert isinstance(x, tuple)
-                    assert len(x) == 2
-                    assert x[0] in [MessageType.WORKFLOW_INFO, MessageType.TASK_INFO], \
-                        "_migrate_logs_to_internal can only migrate WORKFLOW_,TASK_INFO message from priority queue, got x[0] == {}".format(x[0])
-                    self._dispatch_to_internal(x)
-                elif queue_tag == 'resource':
-                    assert isinstance(x, tuple), "_migrate_logs_to_internal was expecting a tuple, got {}".format(x)
-                    assert x[0] == MessageType.RESOURCE_INFO, \
-                        "_migrate_logs_to_internal can only migrate RESOURCE_INFO message from resource queue, got tag {}, message {}".format(x[0], x)
-                    self._dispatch_to_internal(x)
-                elif queue_tag == 'node':
-                    assert len(x) == 2, "expected message tuple to have exactly two elements"
-                    assert x[0] == MessageType.NODE_INFO, "_migrate_logs_to_internal can only migrate NODE_INFO messages from node queue"
-
-                    self._dispatch_to_internal(x)
-                elif queue_tag == 'energy':
-                    self._dispatch_to_internal(x)
-                elif queue_tag == "block":
-                    self._dispatch_to_internal(x)
-                else:
-                    logger.error(f"Discarding because unknown queue tag '{queue_tag}', message: {x}")
+                self._dispatch_to_internal(x)
 
     def _dispatch_to_internal(self, x: Tuple) -> None:
         if x[0] in [MessageType.WORKFLOW_INFO, MessageType.TASK_INFO]:
@@ -701,8 +591,6 @@ class DatabaseManager:
             body = x[1]
             self.pending_resource_queue.put(body)
         elif x[0] == MessageType.NODE_INFO:
-            assert len(x) == 2, "expected NODE_INFO tuple to have exactly two elements"
-
             logger.info("Will put {} to pending node queue".format(x[1]))
             self.pending_node_queue.put(x[1])
         elif x[0] == MessageType.ENERGY_INFO:
@@ -806,13 +694,8 @@ class DatabaseManager:
 
 # @wrap_with_logs(target="database_manager")
 def dbm_starter(exception_q: "queue.Queue[Tuple[str, str]]",
-                priority_msgs: "queue.Queue[TaggedMonitoringMessage]",
-                node_msgs: "queue.Queue[MonitoringMessage]",
-                block_msgs: "queue.Queue[MonitoringMessage]",
-                resource_msgs: "queue.Queue[MonitoringMessage]",
-                energy_msgs: "queue.Queue[MonitoringMessage]",
+                message_q: "queue.Queue[AddressedMonitoringMessage]",
                 db_url: str,
-                kafka_topic: str,
                 logdir: str,
                 logging_level: int) -> None:
     """Start the database manager process
@@ -825,10 +708,9 @@ def dbm_starter(exception_q: "queue.Queue[Tuple[str, str]]",
     try:
         dbm = DatabaseManager(db_url=db_url,
                               logdir=logdir,
-                              logging_level=logging_level,
-                              kafka_topic=kafka_topic)
+                              logging_level=logging_level)
         logger.info("Starting dbm in dbm starter")
-        dbm.start(priority_msgs, node_msgs, block_msgs, resource_msgs, energy_msgs)
+        dbm.start(message_q)
     except KeyboardInterrupt:
         logger.exception("KeyboardInterrupt signal caught")
         dbm.close()
