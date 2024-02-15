@@ -586,9 +586,6 @@ class DatabaseManager:
         if exception_happened:
             raise RuntimeError("An exception happened sometime during database processing and should have been logged in database_manager.log")
 
-        if _kafka_enabled:
-            self.db.producer.flush()
-
     @wrap_with_logs(target="database_manager")
     def _migrate_logs_to_internal(self, logs_queue: queue.Queue, kill_event: threading.Event) -> None:
         logger.info("Starting pull processing")

@@ -34,7 +34,7 @@ else:
 
 _kafka_manager_excepts: Optional[Exception]
 try:
-    from parsl.monitoring.kafka_manager import kafka_starter, KafkaConfig
+    from parsl.monitoring.kafka_manager import kafka_starter
 except Exception as e:
     _kafka_manager_excepts = e
 else:
@@ -100,8 +100,8 @@ class MonitoringHub(RepresentationMixin):
                  resource_monitoring_enabled: bool = True,
                  resource_monitoring_interval: float = 30, # in seconds
                  
-                 routing_policy: Optional[Dict|str] = MessageRoutingOptions.DATABASE,
-                 kafka_config: Any = None,
+                 routing_policy: Union[Dict,MessageRoutingOptions] = MessageRoutingOptions.DATABASE,
+                 kafka_config: Union[str, dict] = 'green-faas',
                  logging_endpoint: str = 'sqlite:///runinfo/monitoring.db'):
         """
         Parameters
@@ -173,28 +173,29 @@ class MonitoringHub(RepresentationMixin):
         self.routing_policy = routing_policy
         self.db_enabled = False
         self.kafka_enabled = False
-        if routing_policy | MessageRoutingOptions.DATABASE != 0:
+        
+        if routing_policy & MessageRoutingOptions.DATABASE != 0:
             if _db_manager_excepts:
                 raise _db_manager_excepts
             self.db_enabled = True
-        elif routing_policy | MessageRoutingOptions.KAFKA != 0:
+
+        if routing_policy & MessageRoutingOptions.KAFKA != 0:
             if _kafka_manager_excepts:
                 raise _kafka_manager_excepts
             self.kafka_enabled = True
+
         elif isinstance(routing_policy, dict):
             for val in routing_policy.values():
-                if val | MessageRoutingOptions.DATABASE != 0:
+                if val & MessageRoutingOptions.DATABASE != 0:
                     if _db_manager_excepts:
                         raise _db_manager_excepts
                     self.db_enabled = True
-                elif val | MessageRoutingOptions. KAFKA != 0:
+                elif val & MessageRoutingOptions. KAFKA != 0:
                     if _kafka_manager_excepts:
                         raise _kafka_manager_excepts
                     self.kafka_enabled = True
         
         self.kafka_config =  kafka_config
-        if self.kafka_enabled and self.kafka_config is None:
-            self.kafka_config = KafkaConfig()
 
     def start(self, run_id: str, run_dir: str) -> int:
 
@@ -220,6 +221,7 @@ class MonitoringHub(RepresentationMixin):
         self.kafka_message_q: Queue[AddressedMonitoringMessage]
         self.kafka_message_q = SizedQueue()
 
+        self.logger.info(f"Routing policy: {self.routing_policy}")
 
         self.router_proc = ForkProcess(target=router_starter,
                                        args=(comm_q, 
@@ -398,7 +400,7 @@ class MonitoringHub(RepresentationMixin):
 def filesystem_receiver(logdir: str, 
                         db_message_q: "queue.Queue[AddressedMonitoringMessage]", 
                         kafka_message_q: "queue.Queue[AddressedMonitoringMessage]", 
-                        routing_policy: Optional[dict|str],
+                        routing_policy: Optional[Union[dict,str]],
                         run_dir: str) -> None:
     logger = start_file_logger("{}/monitoring_filesystem_radio.log".format(logdir),
                                name="monitoring_filesystem_radio",
@@ -436,9 +438,9 @@ def filesystem_receiver(logdir: str,
                 logger.info(f"Message received is: {message}")
                 assert isinstance(message, tuple)
 
-                if routing_policy[msg_type] | MessageRoutingOptions.DATABASE != 0:
+                if routing_policy[msg_type] & MessageRoutingOptions.DATABASE != 0:
                     db_message_q.put(cast(AddressedMonitoringMessage, message))
-                if routing_policy[msg_type] | MessageRoutingOptions.KAFKA != 0:
+                if routing_policy[msg_type] & MessageRoutingOptions.KAFKA != 0:
                     kafka_message_q.put(cast(AddressedMonitoringMessage, message))
 
                 os.remove(full_path_filename)
@@ -460,7 +462,7 @@ class MonitoringRouter:
                  run_id: str,
                  logging_level: int = logging.INFO,
                  atexit_timeout: int = 3,    # in seconds,
-                 routing_policy : MessageRoutingOptions | Dict[MessageType, MessageRoutingOptions] = None
+                 routing_policy : Union[MessageRoutingOptions, Dict[MessageType, MessageRoutingOptions]] = None
                 ):
         """ Initializes a monitoring configuration class.
 
@@ -530,10 +532,10 @@ class MonitoringRouter:
             raise ValueError("Invalid routing policy")
 
     def route(self, msg_type, msg):
-        if self.routing_policy[msg_type] | MessageRoutingOptions.DATABASE != 0:
+        if self.routing_policy[msg_type] & MessageRoutingOptions.DATABASE != 0:
             self.db_message_q.put(msg)
         
-        if self.routing_policy[msg_type] | MessageRoutingOptions.KAFKA != 0:
+        if self.routing_policy[msg_type] & MessageRoutingOptions.KAFKA != 0:
             self.kafka_message_q.put(msg)
 
     def start(self,
@@ -620,7 +622,7 @@ def router_starter(comm_q: "queue.Queue[Union[Tuple[int, int], str]]",
                    logdir: str,
                    logging_level: int,
                    run_id: str,
-                   routing_policy: Optional[str|dict]) -> None:
+                   routing_policy: Optional[Union[str,dict]]) -> None:
     setproctitle("parsl: monitoring router")
     try:
         router = MonitoringRouter(hub_address=hub_address,

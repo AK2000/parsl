@@ -1,9 +1,15 @@
 from collections import defaultdict
 import socket
 import logging
-from typing import NamedTuple, Any, Dict
+import json
+from typing import NamedTuple, Any, Dict, Optional, Union
+from multiprocessing import Queue
 
 from parsl.monitoring.message_type import MessageType
+from parsl.process_loggers import wrap_with_logs
+from parsl.utils import setproctitle
+
+logger = logging.getLogger(__name__)
 
 try:
     from diaspora_event_sdk import KafkaProducer
@@ -12,8 +18,6 @@ except ImportError:
 else:
     _kafka_enabled = True
     logger.warning("Writing Monitoring Messages to Kafka")
-
-logger = logging.getLogger(__name__)
 
 def start_file_logger(filename: str, name: str = 'kafka', level: int = logging.DEBUG, format_string: Optional[str] = None) -> logging.Logger:
     """Add a stream log handler.
@@ -48,17 +52,6 @@ def start_file_logger(filename: str, name: str = 'kafka', level: int = logging.D
     logger.addHandler(handler)
     return logger
 
-
-DEFAULT_MESSAGE_MAPPING = {
-    MessageType.TASK_INFO: "green-faas-predictions",
-    MessageType.RESOURCE_INFO: "green-faas-resources",
-    MessageType.ENERGY_INFO: "green-faas-resources"
-}
-
-
-class KafkaConfig(NamedTuple):
-    topic: dict[MessageType, str] | str = DEFAULT_MESSAGE_MAPPING
-
 class DateTimeEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, (dataetime.datetime, datetime.date, datetime.time)):
@@ -72,21 +65,22 @@ class KafkaManager:
                                     ("Kafka requires the diaspora event sdk"))
 
     def __init__(self,
-                 config: KafkaConfig,
-                 logdir: str, = '.'
-                 logging_level: int = logging.INFO
+                 topic_map: Union[str, dict],
+                 logdir: str = '.',
+                 logging_level: int = logging.INFO,
                  ):
 
         self.producer = KafkaProducer(value_serializer=KafkaManager.serialize)
-        if isinstance(config.topic, dict):
-            self.topic_map = config.topic
-        elif isinstance(config.topic, str):
-            self.topic_map = defaultdict(config.topic)
+        if isinstance(topic_map, dict):
+            self.topic_map = topic_map
+        elif isinstance(topic_map, str):
+            self.topic_map = defaultdict(lambda : topic_map)
         else:
             raise ValueError("Topic contains an invalid value")
-            
+
     def start(self, message_queue):
         self.pending_sends = []
+        logger.info("Starting Kafka manager")
 
         while True:
             try:
@@ -99,25 +93,41 @@ class KafkaManager:
                 continue
             else:
                 if x == 'STOP':
+                    logger.info(f"Recieved stop signal from monitoring hub")
                     break
                 else:
-                    self.pending_sends.append(self.send(x))
+                    f = self.send(x)
+                    if f is not None:
+                        self.pending_sends.append(f)
             
-            if self.pending_sends > 1000:
+            if len(self.pending_sends) > 10000:
                 for send_future in futures.as_completed(self.pending_sends):
                     if send_future.exception():
                         logger.warning("Exception occurred during message send: %s", send_future.exception())
                     self.pending_sends = []
-        
+
+        logger.info("Draining Kafka manager")
+
+        self.db.producer.flush()
         for send_future in futures.as_completed(self.pending_sends):
             if send_future.exception():
                 logger.warning("Exception occurred during message send: %s", send_future.exception())
             self.pending_sends = []
+        
+        logger.info("Kafka manager exiting")
 
     def send(self, message):
-        topic = self.topic_map[message[0]]
-        key = message[1]["run_id"] # So we can partition streams based on run
-        self.producer.send(topic=topic, key=key, value=message)
+        try:
+            topic = self.topic_map[message[0]]
+        except:
+            logger.info(f"Ignoring message of type {message[0]} that was not sent to a topic")
+            return None
+        else:
+            key = message[1]["run_id"] # So we can partition streams based on run
+            logger.info(f"Sending message of type {key}:{message[0]} to topic {topic}")
+            future = self.producer.send(topic=topic, key=key, value=message)
+            logger.info(f"Sent message")
+            return future
 
     @staticmethod
     def serialize(value):
@@ -127,7 +137,7 @@ class KafkaManager:
 @wrap_with_logs(target="kafka_manager")
 def kafka_starter(exception_q: "queue.Queue[Tuple[str, str]]",
                   message_q: "queue.Queue[AddressedMonitoringMessage]",
-                  kafka_config: KafkaConfig,
+                  kafka_config: Union[str, dict],
                   logdir: str,
                   logging_level: int) -> None:
     """Start the kafka manager process
@@ -145,14 +155,12 @@ def kafka_starter(exception_q: "queue.Queue[Tuple[str, str]]",
     try:
         kafka_manager = KafkaManager(kafka_config)
         logger.info("Starting kafka manager in kafka starter")
-        dbm.start(message_q)
+        kafka_manager.start(message_q)
     except KeyboardInterrupt:
         logger.exception("KeyboardInterrupt signal caught")
-        dbm.close()
         raise
     except Exception as e:
         logger.exception("kafka_manager.start exception")
-        exception_q.put(("DBM", str(e)))
-        dbm.close()
+        exception_q.put(("Kafka", str(e)))
 
     logger.info("End of kafka_starter")

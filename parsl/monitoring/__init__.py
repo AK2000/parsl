@@ -1,3 +1,4 @@
-from parsl.monitoring.monitoring import MonitoringHub
+from parsl.monitoring.monitoring import MonitoringHub, MessageRoutingOptions
+from parsl.monitoring.message_type import MessageType
 
-__all__ = ['MonitoringHub']
+__all__ = ['MonitoringHub', 'MessageRoutingOptions', 'MessageType']
