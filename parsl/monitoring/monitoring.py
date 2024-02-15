@@ -6,6 +6,7 @@ import logging
 import typeguard
 import zmq
 import enum
+from collections import defaultdict
 
 import queue
 
@@ -99,7 +100,7 @@ class MonitoringHub(RepresentationMixin):
                  resource_monitoring_enabled: bool = True,
                  resource_monitoring_interval: float = 30, # in seconds
                  
-                 routing_policy: Optional[Dict|str] = None,
+                 routing_policy: Optional[Dict|str] = MessageRoutingOptions.DATABASE,
                  kafka_config: Any = None,
                  logging_endpoint: str = 'sqlite:///runinfo/monitoring.db'):
         """
@@ -160,7 +161,6 @@ class MonitoringHub(RepresentationMixin):
         self.hub_port_range = hub_port_range
 
         self.logging_endpoint = logging_endpoint
-        self.kafka_topic = kafka_topic
         self.logdir = logdir
         self.monitoring_debug = monitoring_debug
 
@@ -192,10 +192,9 @@ class MonitoringHub(RepresentationMixin):
                         raise _kafka_manager_excepts
                     self.kafka_enabled = True
         
-        if self.kafka_enabled:
-            self.kafka_config =  kafka_config
-            if self.kafka_config is None:
-                self.kafka_config = KafkaConfig()
+        self.kafka_config =  kafka_config
+        if self.kafka_enabled and self.kafka_config is None:
+            self.kafka_config = KafkaConfig()
 
     def start(self, run_id: str, run_dir: str) -> int:
 
@@ -244,8 +243,7 @@ class MonitoringHub(RepresentationMixin):
         if self.db_enabled:
             self.dbm_proc = ForkProcess(target=dbm_starter,
                                         args=(self.exception_q, 
-                                            self.db_message_q,
-
+                                              self.db_message_q,
                                         ),
                                         kwargs={"logdir": self.logdir,
                                                 "logging_level": logging.DEBUG if self.monitoring_debug else logging.INFO,
@@ -273,7 +271,11 @@ class MonitoringHub(RepresentationMixin):
             self.logger.info("Started the Kafka process {}".format(self.kafka_proc.pid))
 
         self.filesystem_proc = Process(target=filesystem_receiver,
-                                       args=(self.logdir, self.db_message_q, run_dir),
+                                       args=(self.logdir, 
+                                             self.db_message_q,
+                                             self.kafka_message_q, 
+                                             self.routing_policy,
+                                             run_dir),
                                        name="Monitoring-Filesystem-Process",
                                        daemon=True
         )
@@ -339,19 +341,34 @@ class MonitoringHub(RepresentationMixin):
 
                 self.filesystem_proc.terminate()
             self.logger.info("Waiting for router to terminate")
-            self.router_proc.join()
-            self.logger.debug("Finished waiting for router termination")
-            if len(exception_msgs) == 0:
-                self.logger.debug("Sending STOP to DBM")
-                self.priority_msgs.put(("STOP", 0))
-            else:
-                self.logger.debug("Not sending STOP to DBM, because there were DBM exceptions")
-            self.logger.debug("Waiting for DB termination")
-            if self.db_enabled:
+            try:
+                self.router_proc.join(5)
+                self.logger.info("Finished waiting for router termination")
+            except:
+                self.logger.info("Terminating router process")
+                self.router_proc.terminate()
+            
+            
+            if self.db_enabled and len(exception_msgs) == 0:
+                self.logger.info("Sending STOP to DBM")
+                self.db_message_q.put(("STOP", 0))
+
+                self.logger.info("Waiting for DB termination")
                 self.dbm_proc.join()
-            if self.kafka_enabled:
+                self.logger.debug("Finished waiting for DBM termination")
+            else:
+                self.logger.debug("Not sending STOP to DBM")
+
+            if self.kafka_enabled and len(exception_msgs) == 0:
+                self.logger.debug("Sending STOP to kafka")
+                self.kafka_message_q.put(("STOP", 0))
+
+                self.logger.debug("Waiting for Kafka manager termination")
                 self.kafka_proc.join()
-            self.logger.debug("Finished waiting for DBM termination")
+                self.logger.debug("Finished waiting for Kafka manager termination")
+            else:
+                self.logger.debug("Not sending STOP to Kafka")
+            
 
             # should this be message based? it probably doesn't need to be if
             # we believe we've received all messages
@@ -400,9 +417,9 @@ def filesystem_receiver(logdir: str,
     if isinstance(routing_policy, dict):
         pass
     elif isinstance(routing_policy, MessageRoutingOptions):
-        routing_policy = defaultdict(routing_policy)
+        routing_policy = defaultdict(lambda : routing_policy)
     elif routing_policy is None:
-        routing_policy = defaultdict(MessageRoutingOptions.DATABASE)
+        routing_policy = defaultdict(lambda : MessageRoutingOptions.DATABASE)
     else:
         raise ValueError("Invalid routing policy")
 
@@ -506,18 +523,18 @@ class MonitoringRouter:
         if isinstance(routing_policy, dict):
             self.routing_policy = routing_policy
         elif isinstance(routing_policy, MessageRoutingOptions):
-            self.routing_policy = defaultdict(routing_policy)
+            self.routing_policy = defaultdict(lambda : routing_policy)
         elif routing_policy is None:
-            self.routing_policy = defaultdict(MessageRoutingOptions.DATABASE)
+            self.routing_policy = defaultdict(lambda : MessageRoutingOptions.DATABASE)
         else:
             raise ValueError("Invalid routing policy")
 
     def route(self, msg_type, msg):
         if self.routing_policy[msg_type] | MessageRoutingOptions.DATABASE != 0:
-            self.db_message_q(msg)
+            self.db_message_q.put(msg)
         
         if self.routing_policy[msg_type] | MessageRoutingOptions.KAFKA != 0:
-            self.kafka_message_q(msg)
+            self.kafka_message_q.put(msg)
 
     def start(self,
               db_message_q: "queue.Queue[AddressedMonitoringMessage]",
@@ -552,7 +569,11 @@ class MonitoringRouter:
                         msg_0: AddressedMonitoringMessage
                         msg_0 = (msg, 0)
 
-                        if MessageType.has_value(msg[0]):
+                        if msg[0] in MessageType:
+                            try:
+                                msg[1]['run_id'] = self.run_id
+                            except:
+                                pass
                             self.route(msg[0], msg_0)
                         else:
                             self.logger.error(f"Discarding message from interchange with unknown type {msg[0].value}")
@@ -589,11 +610,8 @@ class MonitoringRouter:
 @wrap_with_logs
 def router_starter(comm_q: "queue.Queue[Union[Tuple[int, int], str]]",
                    exception_q: "queue.Queue[Tuple[str, str]]",
-                   priority_msgs: "queue.Queue[AddressedMonitoringMessage]",
-                   node_msgs: "queue.Queue[AddressedMonitoringMessage]",
-                   block_msgs: "queue.Queue[AddressedMonitoringMessage]",
-                   resource_msgs: "queue.Queue[AddressedMonitoringMessage]",
-                   energy_msgs: "queue.Queue[AddressedMonitoringMessage]",
+                   db_msgs: "queue.Queue[AddressedMonitoringMessage]",
+                   kafka_msgs: "queue.Queue[AddressedMonitoringMessage]",
 
                    hub_address: str,
                    hub_port: Optional[int],
@@ -620,7 +638,7 @@ def router_starter(comm_q: "queue.Queue[Union[Tuple[int, int], str]]",
 
         router.logger.info("Starting MonitoringRouter in router_starter")
         try:
-            router.start(priority_msgs, node_msgs, block_msgs, resource_msgs, energy_msgs)
+            router.start(db_msgs, kafka_msgs)
         except Exception as e:
             router.logger.exception("router.start exception")
             exception_q.put(('Hub', str(e)))

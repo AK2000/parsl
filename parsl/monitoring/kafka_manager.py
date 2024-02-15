@@ -84,13 +84,11 @@ class KafkaManager:
             self.topic_map = defaultdict(config.topic)
         else:
             raise ValueError("Topic contains an invalid value")
-
-        self._kill_event = threading.Event()
-    
+            
     def start(self, message_queue):
         self.pending_sends = []
 
-        while (not self._kill_event.is_set()):
+        while True:
             try:
                 x, addr = message_queue.get(timeout=0.1)
             except queue.Empty:

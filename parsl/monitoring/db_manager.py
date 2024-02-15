@@ -283,6 +283,39 @@ class Database:
             PrimaryKeyConstraint('run_id', 'block_id', 'timestamp'),
         )
 
+def start_file_logger(filename: str, name: str = 'database_manager', level: int = logging.DEBUG, format_string: Optional[str] = None) -> logging.Logger:
+    """Add a stream log handler.
+
+    Parameters
+    ---------
+
+    filename: string
+        Name of the file to write logs to. Required.
+    name: string
+        Logger name.
+    level: logging.LEVEL
+        Set the logging level. Default=logging.DEBUG
+        - format_string (string): Set the format string
+    format_string: string
+        Format string to use.
+
+    Returns
+    -------
+        None.
+    """
+    if format_string is None:
+        format_string = "%(asctime)s.%(msecs)03d %(name)s:%(lineno)d [%(levelname)s]  %(message)s"
+
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    logger.propagate = False
+    handler = logging.FileHandler(filename)
+    handler.setLevel(level)
+    formatter = logging.Formatter(format_string, datefmt='%Y-%m-%d %H:%M:%S')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    return logger
+
 class DatabaseManager:
     def __init__(self,
                  db_url: str = 'sqlite:///runinfo/monitoring.db',
@@ -299,15 +332,11 @@ class DatabaseManager:
 
         # logger.propagate = False
 
-        set_file_logger("{}/database_manager_2.log".format(self.logdir), level=logging_level,
+        start_file_logger("{}/database_manager.log".format(self.logdir), level=logging_level,
                         format_string="%(asctime)s.%(msecs)03d %(name)s:%(lineno)d [%(levelname)s] [%(threadName)s %(thread)d] %(message)s",
-                        name="database_manager_2")
+                        name="database_manager")
 
-        global logger 
-
-        logger = logging.getLogger("database_manager_2")
-
-        logger.debug("Initializing Database Manager process")
+        logger.info("Initializing Database Manager process")
 
         self.db = Database(db_url)
         self.batching_interval = batching_interval
@@ -324,8 +353,8 @@ class DatabaseManager:
 
         self._kill_event = threading.Event()
         self._pull_thread = threading.Thread(target=self._migrate_logs_to_internal,
-                                                            args=(
-                                                                message_queue, 'priority', self._kill_event,),
+                                                            args=(message_queue,
+                                                                  self._kill_event),
                                                             name="Monitoring-migrate",
                                                             daemon=True,
                                                             )
@@ -355,22 +384,14 @@ class DatabaseManager:
         exception_happened = False
 
         while (not self._kill_event.is_set() or
-               self.pending_priority_queue.qsize() != 0 or self.pending_resource_queue.qsize() != 0 or
-               self.pending_node_queue.qsize() != 0 or self.pending_block_queue.qsize() != 0 or
-               self.pending_energy_queue.qsize() != 0 or
-               message_queue.qsize() != 0):
+               self.pending_node_queue.qsize() != 0 or 
+               self.pending_block_queue.qsize() != 0):
 
             """
             WORKFLOW_INFO and TASK_INFO messages (i.e. priority messages)
 
             """
             try:
-                logger.debug("""Checking STOP conditions: {}, {}, {}, {}, {}, {}, {}, {}, {}""".format(
-                                  self._kill_event.is_set(),
-                                  self.pending_priority_queue.qsize() != 0, self.pending_resource_queue.qsize() != 0,
-                                  self.pending_node_queue.qsize() != 0, self.pending_block_queue.qsize() != 0,
-                                  message_queue.qsize() != 0))
-
                 # This is the list of resource messages which can be reprocessed as if they
                 # had just arrived because the corresponding first task message has been
                 # processed (corresponding by task id)
@@ -568,19 +589,20 @@ class DatabaseManager:
         if _kafka_enabled:
             self.db.producer.flush()
 
-    # @wrap_with_logs(target="database_manager")
+    @wrap_with_logs(target="database_manager")
     def _migrate_logs_to_internal(self, logs_queue: queue.Queue, kill_event: threading.Event) -> None:
-        logger.info("Starting processing for queue {}".format(queue_tag))
+        logger.info("Starting pull processing")
 
         while not kill_event.is_set() or logs_queue.qsize() != 0:
-            logger.debug("""Checking STOP conditions for {} threads: {}, {}"""
-                         .format(queue_tag, kill_event.is_set(), logs_queue.qsize() != 0))
+            logger.debug("""Checking STOP conditions: {}, {}"""
+                         .format(kill_event.is_set(), logs_queue.qsize() != 0))
             try:
                 x, addr = logs_queue.get(timeout=0.1)
             except queue.Empty:
                 continue
             else:
                 if x == 'STOP':
+                    logger.info("Recieved stop message")
                     self.close()
                 self._dispatch_to_internal(x)
 

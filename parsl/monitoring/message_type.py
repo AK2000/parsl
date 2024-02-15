@@ -20,3 +20,12 @@ class MessageType(Enum):
 
     # Reports of node-level energy information
     ENERGY_INFO = 5
+
+    @classmethod
+    def __contains__(cls, item):
+        try:
+            cls(item)
+        except ValueError:
+            return False
+        else:
+            return True
