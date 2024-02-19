@@ -113,5 +113,11 @@ def send_first_last_message(try_id: int,
             'timestamp': datetime.datetime.now(),
             'pid': os.getpid()
     })
+
+    if not is_last:
+        msg[1]["task_try_time_running"] = msg[1]["timestamp"]
+    else:
+        msg[1]["task_try_time_running_ended"] = msg[1]["timestamp"]
+        
     radio.send(msg)
     return

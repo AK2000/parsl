@@ -1,9 +1,12 @@
 from collections import defaultdict
+import concurrent.futures
+import datetime
 import socket
 import logging
 import json
 from typing import NamedTuple, Any, Dict, Optional, Union
 from multiprocessing import Queue
+import queue
 
 from parsl.monitoring.message_type import MessageType
 from parsl.process_loggers import wrap_with_logs
@@ -54,7 +57,7 @@ def start_file_logger(filename: str, name: str = 'kafka', level: int = logging.D
 
 class DateTimeEncoder(json.JSONEncoder):
     def default(self, obj):
-        if isinstance(obj, (dataetime.datetime, datetime.date, datetime.time)):
+        if isinstance(obj, (datetime.datetime, datetime.date, datetime.time)):
             return obj.isoformat()
         return super(DateTimeEncoder, self).default(obj)
 
@@ -86,11 +89,7 @@ class KafkaManager:
             try:
                 x, addr = message_queue.get(timeout=0.1)
             except queue.Empty:
-                for send_future in futures.as_completed(self.pending_sends):
-                    if send_future.exception():
-                        logger.warning("Exception occurred during message send: %s", send_future.exception())
-                    self.pending_sends = []
-                continue
+                pass
             else:
                 if x == 'STOP':
                     logger.info(f"Recieved stop signal from monitoring hub")
@@ -101,37 +100,43 @@ class KafkaManager:
                         self.pending_sends.append(f)
             
             if len(self.pending_sends) > 10000:
-                for send_future in futures.as_completed(self.pending_sends):
-                    if send_future.exception():
+                for send_future in self.pending_sends:
+                    if send_future.exception:
                         logger.warning("Exception occurred during message send: %s", send_future.exception())
                     self.pending_sends = []
 
         logger.info("Draining Kafka manager")
 
-        self.db.producer.flush()
-        for send_future in futures.as_completed(self.pending_sends):
-            if send_future.exception():
+        self.producer.flush()
+        for send_future in self.pending_sends:
+            if send_future.exception:
                 logger.warning("Exception occurred during message send: %s", send_future.exception())
             self.pending_sends = []
         
         logger.info("Kafka manager exiting")
 
     def send(self, message):
+        # Hacky way to deal with message from function wrapper 
+        # TODO: Change me after fixing wrapper
+        msg_type = message[0]
+        if msg_type == MessageType.RESOURCE_INFO and (message[1]["first_msg"] or message[1]["last_msg"]):
+            msg_type = MessageType.TASK_INFO
         try:
-            topic = self.topic_map[message[0]]
+            topic = self.topic_map[msg_type]
         except:
-            logger.info(f"Ignoring message of type {message[0]} that was not sent to a topic")
+            logger.info(f"Ignoring message of type {msg_type} that was not sent to a topic")
             return None
         else:
-            key = message[1]["run_id"] # So we can partition streams based on run
-            logger.info(f"Sending message of type {key}:{message[0]} to topic {topic}")
-            future = self.producer.send(topic=topic, key=key, value=message)
+            key = message[1]["run_id"].encode("utf-8") # So we can partition streams based on run
+            message[1]["msg_type"] = msg_type.name
+            logger.info(f"Sending message of type {key}:{msg_type} to topic {topic}")
+            future = self.producer.send(topic=topic, key=key, value=message[1])
             logger.info(f"Sent message")
             return future
 
     @staticmethod
     def serialize(value):
-        return json.dumps(v, cls=DateTimeEncoder).encode("utf-8")
+        return json.dumps(value, cls=DateTimeEncoder).encode("utf-8")
 
 
 @wrap_with_logs(target="kafka_manager")
