@@ -55,7 +55,8 @@ def fresh_config():
                     max_blocks=5,
                     launcher=SingleNodeLauncher(),
                 ),
-                block_error_handler=False
+                block_error_handler=False,
+                energy_monitor="RaplCPUNodeEnergyMonitor"
             )
         ],
         strategy='simple',
