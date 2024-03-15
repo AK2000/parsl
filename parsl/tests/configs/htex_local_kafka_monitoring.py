@@ -69,6 +69,7 @@ def fresh_config():
                         resource_monitoring_interval=1,
                         routing_policy=MessageRoutingOptions.KAFKA,
                         kafka_config={
+                            MessageType.WORKFLOW_INFO: "green-faas-prediction",
                             MessageType.TASK_INFO: "green-faas-prediction",
                             MessageType.RESOURCE_INFO: "green-faas-resources",
                             MessageType.ENERGY_INFO: "green-faas-resources"
