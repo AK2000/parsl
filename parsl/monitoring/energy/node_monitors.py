@@ -23,7 +23,12 @@ class RaplCPUNodeEnergyMonitor(NodeEnergyMonitor):
 
         self._socket_ids = self.get_socket_ids()
         self._pkg_files = self.get_pkg_files()
-        self._dram_files = self.get_dram_files()
+        try:
+            self._dram_files = self.get_dram_files()
+        except Exception as e:
+            logger.warning(f"Could not get DRAM files. Got exception {e}")
+            self._dram_files = None
+
         self.prev_reading = None
         self.report()
 
@@ -40,9 +45,10 @@ class RaplCPUNodeEnergyMonitor(NodeEnergyMonitor):
             devices[f"package-{self._socket_ids[i]}"].total_energy = float(device_file.readline())
             total_energy += devices[f"package-{self._socket_ids[i]}"].total_energy
 
-            dram_file = self._dram_files[i]
-            dram_file.seek(0, 0)
-            devices[f"package-{self._socket_ids[i]}"].devices = {"dram": Result(start_time, end_time, float(dram_file.readline()))}
+            if self._dram_files is not None:
+                dram_file = self._dram_files[i]
+                dram_file.seek(0, 0)
+                devices[f"package-{self._socket_ids[i]}"].devices = {"dram": Result(start_time, end_time, float(dram_file.readline()))}
 
         reading = Result(start_time, end_time, total_energy, devices)
 

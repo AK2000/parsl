@@ -31,7 +31,7 @@ simple = ["cpu_num", 'create_time', 'cwd', 'exe', 'memory_percent', 'nice', 'nam
 # values that can be summed up to see total resources used by task process and its children
 summable_values = ['memory_percent', 'num_threads']
 # perfomance counters read from performance features that can be used to monitor energy
-events= [['UNHALTED_CORE_CYCLES'], ['UNHALTED_REFERENCE_CYCLES'], ['LLC_MISSES'], ['INSTRUCTION_RETIRED']]
+events= [['CPU-CYCLES'], ['CACHE-MISSES'], ['INSTRUCTIONS']]
 
 
 def measure_resource_utilization(run_id: str,
@@ -109,9 +109,9 @@ def measure_resource_utilization(run_id: str,
 
         # Send event counters
         d['perf_unhalted_core_cycles'] = event_counters[0][0]
-        d['perf_unhalted_reference_cycles'] = event_counters[0][1]
-        d['perf_llc_misses'] = event_counters[0][2]
-        d['perf_instructions_retired'] = event_counters[0][3]
+        d['perf_unhalted_reference_cycles'] = 0 # event_counters[0][1]
+        d['perf_llc_misses'] = event_counters[0][1]
+        d['perf_instructions_retired'] = event_counters[0][2]
     
     logging.debug("sending message")
     return d
