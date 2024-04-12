@@ -20,7 +20,6 @@ except ImportError:
     _kafka_enabled = False
 else:
     _kafka_enabled = True
-    logger.warning("Writing Monitoring Messages to Kafka")
 
 def start_file_logger(filename: str, name: str = 'kafka', level: int = logging.DEBUG, format_string: Optional[str] = None) -> logging.Logger:
     """Add a stream log handler.
